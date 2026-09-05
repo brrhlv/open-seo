@@ -420,10 +420,22 @@ export default Alchemy.Stack(
       },
     }).pipe(Alchemy.RemovalPolicy.retain(prod));
 
+    // Self-hosters may front the worker with their own hostname (comma-separated
+    // for several). The zone must already be on the same Cloudflare account;
+    // alchemy creates the DNS record and TLS. Unset = workers.dev only.
+    const selfHostDomains = (yield* optionalVar("SELFHOST_DOMAINS"))
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+
     const app = yield* Cloudflare.Worker("open-seo", {
       name: workerName(stage),
       // Prod serves the real domains; the zone is inferred from the hostname.
-      domain: prod ? ["app.openseo.so", "www.app.openseo.so"] : undefined,
+      domain: prod
+        ? ["app.openseo.so", "www.app.openseo.so"]
+        : selfHostDomains.length > 0
+          ? selfHostDomains
+          : undefined,
       // Prebuilt worker from `vite build` (@cloudflare/vite-plugin). The entry
       // exports the DO + WorkflowEntrypoint classes (re-exported by
       // src/server.ts), which `bundle: false` requires. Sibling chunks under
