@@ -9,6 +9,10 @@ import { GscConnectionRepository } from "@/server/features/gsc/repositories/GscC
 import { RankTrackingRepository } from "@/server/features/rank-tracking/repositories/RankTrackingRepository";
 import { getLatestResults } from "@/server/features/rank-tracking/services/rankTrackingResults";
 import {
+  summarizeRankResults,
+  type RankSummary,
+} from "@/server/features/rank-tracking/services/rankSummary";
+import {
   createDataforseoClient,
   normalizeBacklinksTarget,
 } from "@/server/lib/dataforseo";
@@ -38,14 +42,6 @@ export type DashboardActivation = {
   competitorClickedAt: string | null;
 };
 
-type DashboardRankSummary = {
-  trackedKeywords: number;
-  improved: number;
-  declined: number;
-  top10: number;
-  lastCheckedAt: string | null;
-};
-
 export type DashboardAuditSummary = {
   status: "running" | "completed" | "failed";
   pagesCrawled: number;
@@ -73,7 +69,7 @@ export type DashboardBacklinkSummary = {
 };
 
 type DashboardOverview = {
-  rank: DashboardRankSummary | null;
+  rank: RankSummary | null;
   audit: DashboardAuditSummary | null;
   backlinks: DashboardBacklinkSummary | null;
 };
@@ -119,9 +115,7 @@ async function getOverview(input: {
   return { rank, audit, backlinks };
 }
 
-async function getRankSummary(
-  projectId: string,
-): Promise<DashboardRankSummary | null> {
+async function getRankSummary(projectId: string): Promise<RankSummary | null> {
   const configs = await RankTrackingRepository.getConfigsForProject(projectId);
   if (configs.length === 0) return null;
 
@@ -130,37 +124,7 @@ async function getRankSummary(
       .slice(0, MAX_CONFIGS_FOR_OVERVIEW)
       .map((config) => getLatestResults(config.id, projectId, "7d")),
   );
-
-  const summary: DashboardRankSummary = {
-    trackedKeywords: 0,
-    improved: 0,
-    declined: 0,
-    top10: 0,
-    lastCheckedAt: null,
-  };
-
-  for (const result of results) {
-    summary.trackedKeywords += result.rows.length;
-    if (
-      result.run?.lastCheckedAt &&
-      (!summary.lastCheckedAt ||
-        result.run.lastCheckedAt > summary.lastCheckedAt)
-    ) {
-      summary.lastCheckedAt = result.run.lastCheckedAt;
-    }
-    for (const row of result.rows) {
-      for (const device of ["desktop", "mobile"] as const) {
-        const { position, previousPosition } = row[device];
-        if (position !== null && position <= 10) summary.top10 += 1;
-        if (position === null || previousPosition === null) continue;
-        // Lower position number = better ranking.
-        if (position < previousPosition) summary.improved += 1;
-        else if (position > previousPosition) summary.declined += 1;
-      }
-    }
-  }
-
-  return summary;
+  return summarizeRankResults(results);
 }
 
 async function getAuditSummary(
@@ -297,5 +261,6 @@ async function ensureBacklinkSnapshot(input: {
 export const DashboardService = {
   getActivation,
   getOverview,
+  getBacklinkSummary,
   ensureBacklinkSnapshot,
 };

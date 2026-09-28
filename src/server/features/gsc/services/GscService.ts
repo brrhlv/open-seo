@@ -9,11 +9,14 @@ import {
   type UrlInspectionResult,
 } from "@/server/lib/gscClient";
 import {
-  GscApiError,
   GscNotConnectedError,
   GscTokenError,
+  isExpectedGrantFailure,
 } from "@/server/lib/gscErrors";
-export { GscNotConnectedError } from "@/server/lib/gscErrors";
+export {
+  GscNotConnectedError,
+  isExpectedGrantFailure,
+} from "@/server/lib/gscErrors";
 import {
   buildSearchAnalyticsRequest,
   type GscPerformanceInput,
@@ -76,17 +79,6 @@ async function listGrantsForUser(userId: string) {
         eq(account.providerId, GSC_OAUTH_PROVIDER_ID),
       ),
     );
-}
-
-/** Expected ways a stored grant fails to reach Search Console: no token could be
- *  minted (refresh token revoked or expired), or Google rejected the call
- *  (401/403). These surface a reconnect prompt without fault logging. */
-export function isExpectedGrantFailure(error: unknown): boolean {
-  if (error instanceof GscTokenError) return true;
-  return (
-    error instanceof GscApiError &&
-    (error.status === 401 || error.status === 403)
-  );
 }
 
 async function listSitesForUserWithGrantStatus(

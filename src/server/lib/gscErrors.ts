@@ -25,3 +25,13 @@ export class GscNotConnectedError extends Error {
     this.name = "GscNotConnectedError";
   }
 }
+
+/** A dead or denied Google grant (token failure, or GSC 401/403): the caller
+ *  shows "not connected" rather than an error. Other statuses are real faults. */
+export function isExpectedGrantFailure(error: unknown): boolean {
+  if (error instanceof GscTokenError) return true;
+  return (
+    error instanceof GscApiError &&
+    (error.status === 401 || error.status === 403)
+  );
+}

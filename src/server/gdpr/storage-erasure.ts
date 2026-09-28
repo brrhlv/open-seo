@@ -2,6 +2,7 @@ import { getAuth } from "@/lib/auth";
 import type { OnboardingChatAgent } from "@/server/features/onboarding/OnboardingChatAgent";
 import type { SamChatAgent } from "@/server/features/sam/SamChatAgent";
 import { captureServerError } from "@/server/lib/posthog";
+import { timingSafeEqual } from "@/server/lib/timingSafeEqual";
 import {
   DUB_REFERRED_ORG_KV_PREFIX,
   DUB_REFERRED_USER_KV_PREFIX,
@@ -26,17 +27,6 @@ type GoogleRevocationResult = {
   accountId: string;
   status: "revoked" | "token_unavailable";
 };
-
-function timingSafeEqual(left: string, right: string): boolean {
-  const leftBytes = new TextEncoder().encode(left);
-  const rightBytes = new TextEncoder().encode(right);
-  let difference = leftBytes.length ^ rightBytes.length;
-  const length = Math.max(leftBytes.length, rightBytes.length);
-  for (let index = 0; index < length; index += 1) {
-    difference |= (leftBytes[index] ?? 0) ^ (rightBytes[index] ?? 0);
-  }
-  return difference === 0;
-}
 
 async function authenticateRequest(
   request: Request,
