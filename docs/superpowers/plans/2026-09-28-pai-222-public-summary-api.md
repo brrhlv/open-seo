@@ -1745,7 +1745,6 @@ Access applies the most specific path, so `seo.bryanrivera.ai/api/public/*` now 
 
 - [ ] **Step 1: Run the matrix.** Wait about 30 s after Task 10 for Access propagation. If check 1 still shows the old behavior, wait again and retry once.
 
-```bash
 All response bodies stay in bash variables (`$(curl …)`), so no temp files are needed and python reads only stdin.
 
 ```bash
