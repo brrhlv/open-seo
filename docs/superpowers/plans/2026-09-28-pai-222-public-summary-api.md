@@ -4,7 +4,7 @@
 
 **Goal:** Ship `GET https://seo.bryanrivera.ai/api/public/v1/projects/{projectId}/summary?range=last_28_days`: a read-only JSON summary of one project (rankings, backlinks, audit, GSC, GA4). It authenticates with a bearer key bound to one project. A Cloudflare Access service token (path-scoped Access app) fronts it so the SBLV admin v2 Reports page (CLIENT-SBLV-142) can call it server-side.
 
-**Architecture:** This is a raw TanStack Start file route (`server.handlers.GET`), the same pattern as `/api/health`. The route stays thin and delegates to `handlePublicSummaryRequest` in a new `src/server/features/public-api/` feature. That function checks auth itself, bypassing the app's user-JWT middleware: a timing-safe bearer check against the `OPENSEO_PUBLIC_API_KEYS` secret (`key:projectId[,…]`). It then parses the range and calls `PublicSummaryService.getSummary`, which runs the five sections under `Promise.allSettled`. A failed section becomes `{ "error": "<code>" }`, and an unlinked GSC or GA4 becomes `{ "connected": false }`. Every read reuses existing services and repositories. No DataForSEO-spending path is called. At the edge, a second, path-scoped Access application covers `seo.bryanrivera.ai/api/public` with one `non_identity` policy that admits only the `sblv-admin-openseo` service token. The existing email-gated app keeps covering the rest of the host.
+**Architecture:** This is a raw TanStack Start file route (`server.handlers.GET`), the same pattern as `/api/health`. The route stays thin and delegates to `handlePublicSummaryRequest` in a new `src/server/features/public-api/` feature. That function checks auth itself, bypassing the app's user-JWT middleware: a timing-safe check of the key presented in `Authorization: Bearer` or `X-OpenSEO-Key` against the `OPENSEO_PUBLIC_API_KEYS` secret (`key:projectId[,…]`). It then parses the range and calls `PublicSummaryService.getSummary`, which runs the five sections under `Promise.allSettled`. A failed section becomes `{ "error": "<code>" }`, and an unlinked GSC or GA4 becomes `{ "connected": false }`. Every read reuses existing services and repositories. No DataForSEO-spending path is called. At the edge, a second, path-scoped Access application covers `seo.bryanrivera.ai/api/public` with one `non_identity` policy that admits only the `sblv-admin-openseo` service token. The existing email-gated app keeps covering the rest of the host.
 
 **Tech Stack:** TanStack Start 1.168 (file routes + `server.handlers`) on Cloudflare Workers with D1. Better Auth (Google tokens). Zod 4. Vitest 3 (`pnpm exec vitest run`). pnpm 10.30.1 / Node 25.1. Alchemy 2.0.0-beta.61 (`deploy:selfhost`). Cloudflare API (Access). Vercel CLI 59.20 for the consumer's env vars.
 
@@ -13,8 +13,9 @@
 ## Contract (BINDING, copied from the ticket; the SBLV consumer is being built against exactly this)
 
 `GET https://seo.bryanrivera.ai/api/public/v1/projects/{projectId}/summary?range=last_28_days`
-Headers: `Authorization: Bearer <OPENSEO_PUBLIC_API_KEY>`, `CF-Access-Client-Id`, `CF-Access-Client-Secret`.
-The key is bound to one project (secret stored as `key:projectId`). A request for any other project returns 404 `{"error":"not_found"}`. A bad or missing key returns 401 `{"error":"unauthorized"}`. A range outside `last_7_days | last_28_days | last_90_days` returns 422 (`{"error":"invalid_range"}`). The default range is `last_28_days`. Every response carries `Cache-Control: private, max-age=0`.
+Headers: `Authorization: Bearer <OPENSEO_PUBLIC_API_KEY>` **and/or** `X-OpenSEO-Key: <OPENSEO_PUBLIC_API_KEY>` (the SBLV consumer sends both), plus `CF-Access-Client-Id`, `CF-Access-Client-Secret`.
+The server accepts the key from EITHER header. It checks Bearer first, then `X-OpenSEO-Key`, with the same timing-safe compare. If both headers are present and disagree, the request is accepted when either key is valid for the requested project.
+The key is bound to one project (secret stored as `key:projectId`). A key that is valid only for other projects returns 404 `{"error":"not_found"}`. No valid key in either header returns 401 `{"error":"unauthorized"}`. A range outside `last_7_days | last_28_days | last_90_days` returns 422 (`{"error":"invalid_range"}`). The default range is `last_28_days`. Every response carries `Cache-Control: private, max-age=0`.
 
 ```json
 { "project": {"id": "…", "domain": "socialboothlv.com"}, "generatedAt": "ISO",
@@ -64,7 +65,7 @@ The key is bound to one project (secret stored as `key:projectId`). A request fo
 | `src/server/features/gsc/services/GscService.ts` | modify | Re-export `isExpectedGrantFailure` from the leaf; drop the local copy and the now-unused `GscApiError` import |
 | `src/server/features/rank-tracking/services/rankSummary.ts` | create | Pure `summarizeRankResults` + `RankSummary` type (extracted from `DashboardService.ts:122-164`) |
 | `src/server/features/dashboard/services/DashboardService.ts` | modify | Use `summarizeRankResults`; expose `getBacklinkSummary` on the `DashboardService` object |
-| `src/server/features/public-api/publicApiAuth.ts` (+ `.test.ts`) | create | Parse `OPENSEO_PUBLIC_API_KEYS`; resolve a bearer header to its bound project, timing-safe |
+| `src/server/features/public-api/publicApiAuth.ts` (+ `.test.ts`) | create | Parse `OPENSEO_PUBLIC_API_KEYS`; `resolvePresentedKeys(headers)` (Bearer, then `X-OpenSEO-Key`); `resolveBoundProjects` (timing-safe, every presented key × every configured key) |
 | `src/server/features/public-api/publicSummaryRange.ts` (+ `.test.ts`) | create | Range enum parse (default/422), window dates, rank compare period |
 | `src/server/features/public-api/PublicSummaryService.ts` (+ `.test.ts`) | create | Section assembler with `Promise.allSettled` |
 | `src/server/features/public-api/publicSummaryHandler.ts` (+ `.test.ts`) | create | HTTP semantics: 401/404/422/500/200 + `Cache-Control` |
@@ -121,7 +122,7 @@ Do **not** touch the review control plane: `.greptile/**`, `AGENTS.md`, `CLAUDE.
 **Cloudflare (read live via the API on 2026-09-28)**
 - `.env.selfhost` (main checkout only) defines `DATAFORSEO_API_KEY, ACCESS_ALLOWED_EMAILS, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, BETTER_AUTH_SECRET, SELFHOST_DOMAINS, OPENSEO_TELEMETRY_DISABLED, CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID`. `TEAM_DOMAIN`/`POLICY_AUD` are unset, so **alchemy re-provisions the email Access app on every deploy** (`alchemy.run.ts` `resolveSelfHostAccess`, `emailAccessGate` in `alchemy.access.ts:61-81`, which only sets `domain` = the workers.dev host).
 - Access apps:
-  - `0f0045d6-c514-4f7e-8beb-272de8318848` "open-seo selfhost". Its destinations are `open-seo-selfhost.bryan-rivera-bfd.workers.dev` **and `seo.bryanrivera.ai`**; the second was added by hand (`.env.selfhost.example` says "Add the same hostname(s) to your Access application if you manage it yourself"). Its policy is "open-seo selfhost self-host users" (allow).
+  - `0f0045d6-c514-4f7e-8beb-272de8318848` "open-seo selfhost". The id is shown for orientation only; the scripts look the app up by name/domain. Its destinations are `open-seo-selfhost.bryan-rivera-bfd.workers.dev` **and `seo.bryanrivera.ai`**; the second was added by hand (`.env.selfhost.example` says "Add the same hostname(s) to your Access application if you manage it yourself"). Its policy is "open-seo selfhost self-host users" (allow).
   - Team domain is `dark-sea-f641.cloudflareaccess.com`.
   - The path-scoped precedent is "Twenty CRM API" (`crm.bryanrivera.ai/rest`). There are **no service tokens yet**, and no reusable policy other than the email one.
 - The worker custom domain `seo.bryanrivera.ai` maps to service `open-seo-selfhost` (production).
@@ -139,7 +140,14 @@ Do **not** touch the review control plane: `.greptile/**`, `AGENTS.md`, `CLAUDE.
 - Vercel CLI 59.20.0: `vercel env add <name> <env> --sensitive --yes` reads the value from stdin. `--yes` on `preview` means all branches.
 - Env names: `OPENSEO_API_KEY`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET` (Sensitive); `OPENSEO_API_URL=https://seo.bryanrivera.ai`, `OPENSEO_PROJECT_ID=c65ed7c9-ee05-4b6d-a61f-8817c7a003ae`.
 
-**Secret hygiene:** never `echo`/`cat`/`set -x` a key, client secret or `.env.selfhost`. Every command below keeps values in shell variables or a mode-600 temp file that is deleted at the end.
+**Secret hygiene:** never `echo`/`cat`/`set -x` a key, client secret or `.env.selfhost`. Every command below keeps values in shell variables or in files under the working dir `D="$HOME/.pai222"`, which Task 12 deletes.
+
+**One working dir for bash and python (do not use `/tmp`).** Git Bash `/tmp` is `%LOCALAPPDATA%\Temp`, but the native Windows python (`/c/Python312`) resolves `/tmp` to `C:\tmp`, so the two tools would read and write different files. Every block below therefore:
+- uses `D="$HOME/.pai222"; mkdir -p "$D"`;
+- lets **bash** do all file reads and writes (`curl -o`, `>` redirects, `< file` into python's stdin);
+- hands python a path only as a Windows path via an env var (`SNAP_W="$(cygpath -w "$D/…")"`, read with `os.environ[...]`).
+
+`umask` does **not** protect files on NTFS, so `$D` is not a secure store. The Access client secret sits there only between Task 10 and Task 12, which deletes it. The email-app snapshot (`$D/email-app.snapshot.json`, no secrets) is kept for Rollback until Task 14.
 
 ---
 
@@ -333,7 +341,7 @@ EOF
 
 ---
 
-### Task 3: Key parsing and bearer → project binding
+### Task 3: Key parsing and key → project binding (Bearer or X-OpenSEO-Key)
 
 **Files:**
 - Create: `src/server/features/public-api/publicApiAuth.test.ts`
@@ -343,7 +351,11 @@ EOF
 
 ```ts
 import { describe, expect, it } from "vitest";
-import { parsePublicApiKeys, resolveBearerProject } from "./publicApiAuth";
+import {
+  parsePublicApiKeys,
+  resolveBoundProjects,
+  resolvePresentedKeys,
+} from "./publicApiAuth";
 
 const KEY_A = "a".repeat(64);
 const KEY_B = "b".repeat(64);
@@ -362,22 +374,50 @@ describe("parsePublicApiKeys", () => {
   });
 });
 
-describe("resolveBearerProject", () => {
-  const keys = parsePublicApiKeys(`${KEY_A}:proj-a,${KEY_B}:proj-b`);
+describe("resolvePresentedKeys", () => {
+  it("reads Bearer first, then X-OpenSEO-Key, ignoring other schemes and blanks", () => {
+    expect(
+      resolvePresentedKeys(
+        new Headers({ authorization: `Bearer ${KEY_A}`, "x-openseo-key": KEY_B }),
+      ),
+    ).toEqual([KEY_A, KEY_B]);
+    expect(
+      resolvePresentedKeys(
+        new Headers({ authorization: `Basic ${KEY_A}`, "x-openseo-key": " " }),
+      ),
+    ).toEqual([]);
+  });
+});
 
-  it("returns the project bound to the presented key", () => {
-    expect(resolveBearerProject(`Bearer ${KEY_B}`, keys)).toBe("proj-b");
+describe("resolveBoundProjects", () => {
+  const keys = parsePublicApiKeys(`${KEY_A}:proj-a,${KEY_B}:proj-b`);
+  const bound = (headers: Record<string, string>) => [
+    ...resolveBoundProjects(new Headers(headers), keys),
+  ];
+
+  it("binds a Bearer key or an X-OpenSEO-Key key to its project", () => {
+    expect(bound({ authorization: `Bearer ${KEY_B}` })).toEqual(["proj-b"]);
+    expect(bound({ "x-openseo-key": KEY_A })).toEqual(["proj-a"]);
+  });
+
+  it("accepts either key when both headers are present and disagree", () => {
+    expect(
+      bound({ authorization: "Bearer wrong", "x-openseo-key": KEY_A }),
+    ).toEqual(["proj-a"]);
+    expect(
+      bound({ authorization: `Bearer ${KEY_A}`, "x-openseo-key": "wrong" }),
+    ).toEqual(["proj-a"]);
   });
 
   it.each([
-    null,
-    "",
-    KEY_A,
-    `Basic ${KEY_A}`,
-    `Bearer ${KEY_A.slice(1)}`,
-    `Bearer ${KEY_A}x`,
-  ])("rejects %j", (header) => {
-    expect(resolveBearerProject(header, keys)).toBeNull();
+    {},
+    { authorization: KEY_A },
+    { authorization: `Basic ${KEY_A}` },
+    { authorization: `Bearer ${KEY_A.slice(1)}` },
+    { authorization: `Bearer ${KEY_A}x` },
+    { "x-openseo-key": `${KEY_A}x` },
+  ])("rejects %j", (headers) => {
+    expect(bound(headers)).toEqual([]);
   });
 });
 ```
@@ -416,20 +456,33 @@ export function parsePublicApiKeys(raw: string | undefined): PublicApiKey[] {
   return keys;
 }
 
-/** The project the presented `Authorization: Bearer <key>` is bound to, or
- *  null. Every configured key is compared (no early exit) in constant time. */
-export function resolveBearerProject(
-  authorization: string | null,
+/** Keys presented on the request, in order: `Authorization: Bearer <key>`,
+ *  then `X-OpenSEO-Key: <key>`. The consumer sends both (PAI-222 contract). */
+export function resolvePresentedKeys(headers: Headers): string[] {
+  const presented: string[] = [];
+  const bearer = /^Bearer\s+(\S+)$/i.exec(
+    headers.get("authorization")?.trim() ?? "",
+  )?.[1];
+  if (bearer) presented.push(bearer);
+  const headerKey = headers.get("x-openseo-key")?.trim();
+  if (headerKey) presented.push(headerKey);
+  return presented;
+}
+
+/** Projects bound to ANY presented key (so disagreeing headers are accepted
+ *  when either one is valid). Every presented key is compared against every
+ *  configured key in constant time, with no early exit. */
+export function resolveBoundProjects(
+  headers: Headers,
   keys: PublicApiKey[],
-): string | null {
-  const match = /^Bearer\s+(\S+)$/i.exec(authorization?.trim() ?? "");
-  const presented = match?.[1];
-  if (!presented) return null;
-  let projectId: string | null = null;
-  for (const entry of keys) {
-    if (timingSafeEqual(presented, entry.key)) projectId = entry.projectId;
+): Set<string> {
+  const projects = new Set<string>();
+  for (const presented of resolvePresentedKeys(headers)) {
+    for (const entry of keys) {
+      if (timingSafeEqual(presented, entry.key)) projects.add(entry.projectId);
+    }
   }
-  return projectId;
+  return projects;
 }
 ```
 
@@ -438,13 +491,13 @@ export function resolveBearerProject(
 ```bash
 cd /c/Users/Brizzle/projects/tools/_active/open-seo-PAI-222 && pnpm exec vitest run src/server/features/public-api/publicApiAuth.test.ts
 ```
-Expected: PASS (8 tests).
+Expected: PASS (10 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 cd /c/Users/Brizzle/projects/tools/_active/open-seo-PAI-222 && pnpm exec prettier --write src/server/features/public-api/publicApiAuth.ts src/server/features/public-api/publicApiAuth.test.ts && git add src/server/features/public-api/publicApiAuth.ts src/server/features/public-api/publicApiAuth.test.ts && git commit -m "$(cat <<'EOF'
-feat(public-api): parse project-bound API keys and resolve bearer tokens (PAI-222)
+feat(public-api): parse project-bound API keys; accept Bearer or X-OpenSEO-Key (PAI-222)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 EOF
@@ -1226,13 +1279,17 @@ const KEY = "k".repeat(64);
 const RAW_KEYS = `${KEY}:proj-a`;
 
 function call(
-  options: { projectId?: string; query?: string; authorization?: string } = {},
+  options: {
+    projectId?: string;
+    query?: string;
+    headers?: Record<string, string>;
+  } = {},
 ) {
   const projectId = options.projectId ?? "proj-a";
   return handlePublicSummaryRequest({
     request: new Request(
       `https://seo.test/api/public/v1/projects/${projectId}/summary${options.query ?? ""}`,
-      { headers: { authorization: options.authorization ?? `Bearer ${KEY}` } },
+      { headers: options.headers ?? { authorization: `Bearer ${KEY}` } },
     ),
     projectId,
     rawKeys: RAW_KEYS,
@@ -1245,10 +1302,31 @@ describe("handlePublicSummaryRequest", () => {
   });
 
   it("returns 401 for an unknown key without touching data", async () => {
-    const response = await call({ authorization: `Bearer ${"x".repeat(64)}` });
+    const response = await call({
+      headers: { authorization: `Bearer ${"x".repeat(64)}` },
+    });
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ error: "unauthorized" });
     expect(mocks.getSummary).not.toHaveBeenCalled();
+  });
+
+  it("returns 200 with only a valid X-OpenSEO-Key header", async () => {
+    expect((await call({ headers: { "x-openseo-key": KEY } })).status).toBe(
+      200,
+    );
+  });
+
+  it("returns 401 with only a wrong X-OpenSEO-Key header", async () => {
+    const response = await call({ headers: { "x-openseo-key": "wrong" } });
+    expect(response.status).toBe(401);
+    expect(mocks.getSummary).not.toHaveBeenCalled();
+  });
+
+  it("returns 200 when the Bearer key is wrong but X-OpenSEO-Key is valid", async () => {
+    const response = await call({
+      headers: { authorization: "Bearer wrong", "x-openseo-key": KEY },
+    });
+    expect(response.status).toBe(200);
   });
 
   it("returns 404 when the key is bound to a different project", async () => {
@@ -1300,7 +1378,7 @@ Expected: FAIL with `Failed to resolve import "./publicSummaryHandler"`.
 - [ ] **Step 3: Implement `publicSummaryHandler.ts`**
 
 ```ts
-import { parsePublicApiKeys, resolveBearerProject } from "./publicApiAuth";
+import { parsePublicApiKeys, resolveBoundProjects } from "./publicApiAuth";
 import { parsePublicSummaryRange } from "./publicSummaryRange";
 import { PublicSummaryService } from "./PublicSummaryService";
 
@@ -1312,21 +1390,22 @@ function json(body: unknown, status: number): Response {
   return Response.json(body, { status, headers: CACHE_HEADERS });
 }
 
-/** Trust boundary for the public summary route: a bearer key bound to exactly
- *  one project (OPENSEO_PUBLIC_API_KEYS). Deliberately independent of the
- *  Cloudflare Access user JWT — service-token JWTs carry no email. */
+/** Trust boundary for the public summary route: a key (Authorization: Bearer
+ *  or X-OpenSEO-Key) bound to exactly one project (OPENSEO_PUBLIC_API_KEYS).
+ *  Deliberately independent of the Cloudflare Access user JWT — service-token
+ *  JWTs carry no email. */
 export async function handlePublicSummaryRequest(input: {
   request: Request;
   projectId: string;
   rawKeys: string | undefined;
 }): Promise<Response> {
-  const boundProjectId = resolveBearerProject(
-    input.request.headers.get("authorization"),
+  const boundProjects = resolveBoundProjects(
+    input.request.headers,
     parsePublicApiKeys(input.rawKeys),
   );
-  if (!boundProjectId) return json({ error: "unauthorized" }, 401);
+  if (boundProjects.size === 0) return json({ error: "unauthorized" }, 401);
   // A valid key for another project must not reveal whether this one exists.
-  if (boundProjectId !== input.projectId) {
+  if (!boundProjects.has(input.projectId)) {
     return json({ error: "not_found" }, 404);
   }
 
@@ -1357,7 +1436,7 @@ export async function handlePublicSummaryRequest(input: {
 ```bash
 cd /c/Users/Brizzle/projects/tools/_active/open-seo-PAI-222 && pnpm exec vitest run src/server/features/public-api
 ```
-Expected: PASS (all 4 public-api files, 22 tests).
+Expected: PASS (all 4 public-api files, 27 tests: auth 10, range 4, service 4, handler 9).
 
 - [ ] **Step 5: Commit**
 
@@ -1390,8 +1469,9 @@ import { isHostedAuthMode } from "@/lib/auth-mode";
 import { handlePublicSummaryRequest } from "@/server/features/public-api/publicSummaryHandler";
 
 // Read-only, key-authenticated project summary for external dashboards
-// (PAI-222). A raw route: it establishes its own trust boundary (a bearer key
-// bound to one project, OPENSEO_PUBLIC_API_KEYS) and never reads the
+// (PAI-222). A raw route: it establishes its own trust boundary (a key in
+// Authorization: Bearer or X-OpenSEO-Key, bound to one project via
+// OPENSEO_PUBLIC_API_KEYS) and never reads the
 // Cloudflare Access user JWT. In the self-host deploy a path-scoped Access
 // application with a service-token policy also fronts /api/public/*.
 // Self-host only — hosted mode answers 404.
@@ -1437,7 +1517,7 @@ If `tsc` reports the handler context as implicitly `any` after regeneration, ann
 
 # Read-only project summary API for external dashboards:
 #   GET /api/public/v1/projects/<project-id>/summary
-#   Authorization: Bearer <key>
+#   Authorization: Bearer <key>   (or X-OpenSEO-Key: <key>)
 # Each key is bound to one project (key:projectId); comma-separate several.
 # Generate keys with `openssl rand -hex 32` (32+ characters). Unset = the
 # endpoint answers 401. Front /api/public/* with a service-token Access app.
@@ -1478,10 +1558,10 @@ EOF
 - [ ] **Step 1: Read the full branch diff** (`git -C /c/Users/Brizzle/projects/tools/_active/open-seo-PAI-222 diff main...HEAD`) and confirm each point. Fix any gap with a new TDD step before continuing.
   1. The route never calls `ensureUser` / `requireProjectContext` / `resolveUserContextFromHeaders`.
   2. A 401 happens before any DB read. The project-mismatch 404 happens before any DB read.
-  3. The key compare goes through `timingSafeEqual` across all keys, with no early return.
+  3. The key compare goes through `timingSafeEqual` for every presented key (Bearer, then `X-OpenSEO-Key`) against every configured key, with no early return. When the two headers disagree, a request succeeds only if one of the presented keys is bound to the requested project.
   4. Short or malformed keys are ignored, so an empty or unset secret means everything returns 401.
-  5. No response body or log line includes the key, the `Authorization` header, or Google tokens. `console.error` logs only `{ projectId }` + the error.
-  6. No import path reaches `ensureBacklinkSnapshot`, `createDataforseoClient`, AI-search or opportunity services. Check with `grep -rn "ensureBacklinkSnapshot\|createDataforseoClient\|ai-search\|SearchOpportunity" src/server/features/public-api`, which must print nothing.
+  5. No response body or log line includes the key, the `Authorization` / `X-OpenSEO-Key` headers, or Google tokens. `console.error` logs only `{ projectId }` + the error.
+  6. No import path reaches `ensureBacklinkSnapshot`, `createDataforseoClient`, AI-search or opportunity services. Check with `grep -rn "ensureBacklinkSnapshot\|createDataforseoClient\|ai-search\|SearchOpportunity" src/server/features/public-api`, which must print nothing. `DashboardService.ts` itself imports `createDataforseoClient` (for `ensureBacklinkSnapshot`), so the public API reaches that import transitively through `DashboardService`. This is intentional and safe: only `DashboardService.getBacklinkSummary` is called, a pure D1 read, and no spending method is invoked. Record this in the security read.
   7. The hosted build returns 404.
   8. `storage-erasure.ts` behavior is unchanged: same comparison, now imported.
   9. No control-plane file changed: `git diff --name-only main...HEAD | grep -E '^(\.greptile/|AGENTS\.md|CLAUDE\.md|\.agents/skills/|\.github/)'` must print nothing.
@@ -1489,9 +1569,9 @@ EOF
 - [ ] **Step 2: Fast-forward `main` locally.** Nothing is pushed yet; the deploy runs from the main checkout.
 
 ```bash
-cd /c/Users/Brizzle/projects/tools/_active/open-seo && git status --short && git merge --ff-only PAI-222/public-summary-api && git log --oneline -9
+cd /c/Users/Brizzle/projects/tools/_active/open-seo && git status --short && git merge --ff-only PAI-222/public-summary-api && git log --oneline -10
 ```
-Expected: the tree is clean before the merge, the fast-forward succeeds, and the log shows the 6 PAI-222 commits on top of `43e9ae3`.
+Expected: the tree is clean before the merge and the fast-forward succeeds. The log shows the PAI-222 commits on top of `43e9ae3`: the plan-doc commits (`docs(plan): PAI-222 public summary API` and `docs(plan): PAI-222 review fixes`) plus the 6 implementation commits from Tasks 2-7 (refactor, auth, range, service, handler, route), 8 in total. Adjust the count if any task was split.
 
 ---
 
@@ -1506,12 +1586,94 @@ cd /c/Users/Brizzle/projects/tools/_active/open-seo && if grep -q '^OPENSEO_PUBL
 ```
 Expected: `added` (or `already set`), then `1`.
 
-- [ ] **Step 2: Snapshot the email Access app's destinations** (alchemy re-provisions it on deploy; see Facts)
+- [ ] **Step 2: Snapshot the FULL email Access app and install the restore helper.** Alchemy re-provisions this app on deploy (see Facts). The app is found by name/domain, not by a hard-coded id, in case alchemy ever recreates it.
+
+2a. Write the helper files. They contain no secrets and are reused by Step 4 and by Rollback.
 
 ```bash
-cd /c/Users/Brizzle/projects/tools/_active/open-seo && set -a && . ./.env.selfhost && set +a && curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps/0f0045d6-c514-4f7e-8beb-272de8318848" | python -c "import json,sys; a=json.load(sys.stdin)['result']; print([d['uri'] for d in a.get('destinations',[])])"
+D="$HOME/.pai222" && mkdir -p "$D" && cat > "$D/find_email_app.py" <<'PY'
+# stdin: GET /access/apps?per_page=100 ; stdout: id of the alchemy email app
+import json, sys
+apps = json.load(sys.stdin)["result"]
+match = [a for a in apps
+         if a.get("name") == "open-seo selfhost"
+         or a.get("domain") == "open-seo-selfhost.bryan-rivera-bfd.workers.dev"]
+if len(match) != 1:
+    sys.exit("expected exactly one email app (name 'open-seo selfhost' / workers.dev domain), found %d" % len(match))
+print(match[0]["id"])
+PY
+cat > "$D/restore_email_app.py" <<'PY'
+# stdin: GET /access/apps/{live id}  ; env: SNAP_W (Windows path of the saved
+# snapshot), REUSABLE_IDS (comma list from GET /access/policies), FORCE=1 to
+# rebuild even when the live destinations look right.
+# stdout: the PUT body (empty = nothing to do); diagnostics go to stderr.
+import json, os, sys
+live = json.load(sys.stdin)["result"]
+snap = json.load(open(os.environ["SNAP_W"], encoding="utf-8"))
+live_uris = [d["uri"] for d in live.get("destinations", [])]
+snap_uris = [d["uri"] for d in snap.get("destinations", [])]
+print("live destinations:", live_uris, "| snapshot:", snap_uris, file=sys.stderr)
+if set(snap_uris) <= set(live_uris) and os.environ.get("FORCE") != "1":
+    sys.exit(0)
+
+# Full saved object, read-only/server-computed fields stripped. The only field
+# we intend to change vs. live is `destinations` (back to the snapshot's).
+READ_ONLY = {"id", "uid", "aud", "created_at", "updated_at", "policies",
+             "self_hosted_domains"}  # self_hosted_domains is derived from destinations
+body = {k: v for k, v in snap.items() if k not in READ_ONLY}
+body["destinations"] = snap["destinations"]
+
+reusable = set(filter(None, os.environ.get("REUSABLE_IDS", "").split(",")))
+def policy_ref(p, i):
+    if p.get("reusable") is True or p["id"] in reusable:
+        # Account-level (reusable) policy: reference it, never re-send its body.
+        return {"id": p["id"], "precedence": p.get("precedence", i + 1)}
+    # Legacy app-scoped policy: re-send inline without server-owned fields.
+    return {k: v for k, v in p.items()
+            if k not in {"id", "uid", "created_at", "updated_at", "app_count", "reusable"}}
+snap_policies = snap.get("policies", [])
+if any(p.get("reusable") is True and p["id"] not in reusable for p in snap_policies):
+    # A reusable policy from the snapshot was deleted (e.g. alchemy recreated
+    # it under a new id); referencing it would fail the PUT.
+    print("WARNING: a snapshot reusable policy no longer exists; keeping live policies", file=sys.stderr)
+    snap_policies = live.get("policies", [])
+body["policies"] = [policy_ref(p, i) for i, p in enumerate(snap_policies)]
+changed = sorted(k for k in body if k != "policies" and live.get(k) != body[k])
+print("fields that will change vs. live:", changed, file=sys.stderr)
+json.dump(body, sys.stdout)
+PY
+cat > "$D/restore-email-app.sh" <<'SH'
+#!/usr/bin/env bash
+# Usage: FORCE=0|1 bash "$HOME/.pai222/restore-email-app.sh"
+set -euo pipefail
+D="$HOME/.pai222"
+cd /c/Users/Brizzle/projects/tools/_active/open-seo
+set -a; . ./.env.selfhost; set +a
+BASE="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access"
+AUTH=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+APP_ID=$(curl -s "${AUTH[@]}" "$BASE/apps?per_page=100" | python "$(cygpath -w "$D/find_email_app.py")")
+REUSABLE_IDS=$(curl -s "${AUTH[@]}" "$BASE/policies?per_page=100" | python -c "import json,sys; print(','.join(p['id'] for p in json.load(sys.stdin)['result']))")
+curl -s "${AUTH[@]}" "$BASE/apps/$APP_ID" > "$D/email-app.live.json"
+SNAP_W="$(cygpath -w "$D/email-app.snapshot.json")" REUSABLE_IDS="$REUSABLE_IDS" FORCE="${FORCE:-0}" \
+  python "$(cygpath -w "$D/restore_email_app.py")" < "$D/email-app.live.json" > "$D/email-app.put.json"
+if [ -s "$D/email-app.put.json" ]; then
+  curl -s -X PUT "${AUTH[@]}" -H "Content-Type: application/json" --data-binary @- "$BASE/apps/$APP_ID" < "$D/email-app.put.json" \
+    | python -c "import json,sys; d=json.load(sys.stdin); r=d.get('result') or {}; print('RESTORED', d['success'], d.get('errors'), [x['uri'] for x in r.get('destinations',[])])"
+else
+  echo "destinations intact (app $APP_ID) — no restore"
+fi
+rm -f "$D/email-app.live.json" "$D/email-app.put.json"
+SH
+ls "$D"
 ```
-Expected: `['open-seo-selfhost.bryan-rivera-bfd.workers.dev', 'seo.bryanrivera.ai']`.
+Expected: `find_email_app.py  restore-email-app.sh  restore_email_app.py`.
+
+2b. Save the full snapshot. Bash does every file write; python only filters stdin to stdout.
+
+```bash
+cd /c/Users/Brizzle/projects/tools/_active/open-seo && set -a && . ./.env.selfhost && set +a && D="$HOME/.pai222" && BASE="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access" && APP_ID=$(curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$BASE/apps?per_page=100" | python "$(cygpath -w "$D/find_email_app.py")") && curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$BASE/apps/$APP_ID" | python -c "import json,sys; d=json.load(sys.stdin); assert d['success'], d.get('errors'); json.dump(d['result'], sys.stdout)" > "$D/email-app.snapshot.json" && python -c "import json,sys; a=json.load(sys.stdin); print(a['id'], a['name'], [d['uri'] for d in a.get('destinations',[])], [(p.get('name'), p.get('reusable')) for p in a.get('policies',[])])" < "$D/email-app.snapshot.json"
+```
+Expected: `0f0045d6-c514-4f7e-8beb-272de8318848 open-seo selfhost ['open-seo-selfhost.bryan-rivera-bfd.workers.dev', 'seo.bryanrivera.ai'] [('open-seo selfhost self-host users', True)]`. The flag may print `None` if the API omits `reusable`; the helper then falls back to the `/access/policies` id list. **Record the app id in the ticket log.** If the snapshot does not include `seo.bryanrivera.ai`, stop: the gate is already broken, and restoring from this snapshot would not fix it.
 
 - [ ] **Step 3: Deploy.** Run the `deploy:selfhost` steps by hand in Git Bash; this works around the cmd.exe `NODE_OPTIONS` papercut from `43e9ae3`.
 
@@ -1528,21 +1690,11 @@ Fallbacks, in order:
 - [ ] **Step 4: Re-check the email app's destinations and restore them if alchemy dropped the custom host**
 
 ```bash
-cd /c/Users/Brizzle/projects/tools/_active/open-seo && set -a && . ./.env.selfhost && set +a && API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps/0f0045d6-c514-4f7e-8beb-272de8318848" && curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API" > /tmp/pai222-app.json && python - <<'PY'
-import json
-a = json.load(open("/tmp/pai222-app.json"))["result"]
-uris = [d["uri"] for d in a.get("destinations", [])]
-print("destinations:", uris)
-if "seo.bryanrivera.ai" not in uris:
-    body = {k: a[k] for k in ("type", "name", "domain", "session_duration", "app_launcher_visible") if k in a}
-    body["destinations"] = [{"type": "public", "uri": u} for u in uris + ["seo.bryanrivera.ai"]]
-    body["policies"] = [{"id": p["id"], "precedence": p.get("precedence", i + 1)} for i, p in enumerate(a.get("policies", []))]
-    json.dump(body, open("/tmp/pai222-app-put.json", "w"))
-    print("NEEDS RESTORE")
-PY
-if [ -f /tmp/pai222-app-put.json ]; then curl -s -X PUT -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data @/tmp/pai222-app-put.json "$API" | python -c "import json,sys; d=json.load(sys.stdin); print('restored', d['success'], [x['uri'] for x in d['result'].get('destinations',[])] if d.get('result') else d.get('errors'))"; fi; rm -f /tmp/pai222-app.json /tmp/pai222-app-put.json
+FORCE=0 bash "$HOME/.pai222/restore-email-app.sh"
 ```
-Expected: `destinations` includes `seo.bryanrivera.ai`, or `restored True [...]` with it included. If the restore was needed, note in the ticket log that every alchemy deploy drops the hand-added hostname (a follow-up ticket could teach `emailAccessGate` about `SELFHOST_DOMAINS`).
+The script finds the live app by name/domain. If the live destinations are missing any of the snapshot's, it PUTs the **full saved snapshot** back to the live app id. Read-only fields (`id`, `uid`, `aud`, `created_at`, `updated_at`, `self_hosted_domains`) are stripped. Reusable policies are sent as `{id, precedence}` references, and legacy app-scoped policies are sent inline with their server fields stripped. It prints `fields that will change vs. live:`, which should be `['destinations']` only; anything else means alchemy changed the app and should be noted.
+
+Expected: `destinations intact (app <id>) — no restore`, or `RESTORED True [] [..., 'seo.bryanrivera.ai']`. Run the smoke test in Step 5 after either outcome. If the restore was needed, note in the ticket log that every alchemy deploy drops the hand-added hostname (a follow-up ticket could teach `emailAccessGate` about `SELFHOST_DOMAINS`).
 
 - [ ] **Step 5: Smoke test through the email gate.** The route exists and Access still blocks anonymous requests.
 
@@ -1557,27 +1709,31 @@ Expected: `401` (Access edge `invalid_token`; the path app does not exist yet).
 
 **Files:** none in the repo. The Access resources are created via the Cloudflare API because the custom-domain gate is hand-managed; alchemy provisions only the workers.dev email app (`alchemy.run.ts` `resolveSelfHostAccess` → `alchemy.access.ts:61-81`). The path-scoped app is left out of alchemy on purpose, so a deploy can never delete it.
 
-- [ ] **Step 1: Create the service token.** Keep the client id and secret in a mode-600 temp file; never print them.
+- [ ] **Step 1: Create the service token.** Python writes the id and secret to **stdout**, which bash redirects into `$D/cf.env`; status goes to stderr. Nothing secret reaches the terminal. `$D` is not permission-protected on NTFS, and Task 12 deletes the file.
 
 ```bash
-cd /c/Users/Brizzle/projects/tools/_active/open-seo && set -a && . ./.env.selfhost && set +a && umask 077 && RESP=$(curl -s -X POST "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/service_tokens" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data '{"name":"sblv-admin-openseo","duration":"8760h"}') && printf '%s' "$RESP" | python -c "
+cd /c/Users/Brizzle/projects/tools/_active/open-seo && set -a && . ./.env.selfhost && set +a && D="$HOME/.pai222" && mkdir -p "$D" && curl -s -X POST "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/service_tokens" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data '{"name":"sblv-admin-openseo","duration":"8760h"}' | python -c "
 import json,sys
 d=json.load(sys.stdin); r=d.get('result') or {}
-print('success', d.get('success'), d.get('errors'), 'token_id', r.get('id'), 'expires_at', r.get('expires_at'))
-if d.get('success'):
-    open('/tmp/pai222-cf-service-token.env','w').write('CF_SVC_TOKEN_ID=%s\nCF_CLIENT_ID=%s\nCF_CLIENT_SECRET=%s\n' % (r['id'], r['client_id'], r['client_secret']))
-"; unset RESP
+print('success', d.get('success'), d.get('errors'), 'token_id', r.get('id'), 'expires_at', r.get('expires_at'), file=sys.stderr)
+if not d.get('success'): sys.exit(1)
+sys.stdout.write('CF_SVC_TOKEN_ID=%s\nCF_CLIENT_ID=%s\nCF_CLIENT_SECRET=%s\n' % (r['id'], r['client_id'], r['client_secret']))
+" > "$D/cf.env"; grep -c '^CF_CLIENT_SECRET=.' "$D/cf.env" && grep '^CF_SVC_TOKEN_ID=' "$D/cf.env" >> "$D/ids.env"
 ```
-Expected: `success True [] token_id <uuid> expires_at <date ~2027-09-28>`. Record `token_id` and `expires_at` for the ticket log.
+`$D/ids.env` holds only non-secret resource ids, for the ticket log and for Rollback.
+Expected: stderr shows `success True [] token_id <uuid> expires_at <date ~2027-09-28>`, then `1`. Record `token_id` and `expires_at` for the ticket log. If the output is `0`, delete the empty file (`rm -f "$HOME/.pai222/cf.env"`) before retrying.
 
 If the call returns `success False` with an auth error, the API token lacks Access write scopes. Stop and ask Bryan to add **Access: Service Tokens Edit** and **Access: Apps and Policies Edit** to the token behind `CLOUDFLARE_API_TOKEN` (Cloudflare dashboard → My Profile → API Tokens), then re-run. Do not create the token in the dashboard, where the secret would have to be copied by hand.
 
 - [ ] **Step 2: Create a reusable `non_identity` policy and the path-scoped app**
 
 ```bash
-cd /c/Users/Brizzle/projects/tools/_active/open-seo && set -a && . ./.env.selfhost && . /tmp/pai222-cf-service-token.env && set +a && BASE="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access" && POLICY_ID=$(curl -s -X POST "$BASE/policies" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data "{\"name\":\"sblv-admin-openseo service token\",\"decision\":\"non_identity\",\"include\":[{\"service_token\":{\"token_id\":\"$CF_SVC_TOKEN_ID\"}}]}" | python -c "import json,sys; d=json.load(sys.stdin); print(d['result']['id'] if d.get('success') else 'ERR '+json.dumps(d.get('errors')))") && echo "policy $POLICY_ID" && case "$POLICY_ID" in ERR*) exit 1;; esac && curl -s -X POST "$BASE/apps" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data "{\"type\":\"self_hosted\",\"name\":\"open-seo public API (service token)\",\"domain\":\"seo.bryanrivera.ai/api/public\",\"destinations\":[{\"type\":\"public\",\"uri\":\"seo.bryanrivera.ai/api/public\"}],\"app_launcher_visible\":false,\"session_duration\":\"24h\",\"policies\":[{\"id\":\"$POLICY_ID\",\"precedence\":1}]}" | python -c "import json,sys; d=json.load(sys.stdin); r=d.get('result') or {}; print('app', d.get('success'), d.get('errors'), r.get('id'), [x.get('uri') for x in r.get('destinations',[])], [p.get('decision') for p in r.get('policies',[])])"
+cd /c/Users/Brizzle/projects/tools/_active/open-seo && D="$HOME/.pai222" && set -a && . ./.env.selfhost && . "$D/cf.env" && set +a && BASE="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access" && POLICY_ID=$(curl -s -X POST "$BASE/policies" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data "{\"name\":\"sblv-admin-openseo service token\",\"decision\":\"non_identity\",\"include\":[{\"service_token\":{\"token_id\":\"$CF_SVC_TOKEN_ID\"}}]}" | python -c "import json,sys; d=json.load(sys.stdin); print(d['result']['id'] if d.get('success') else 'ERR '+json.dumps(d.get('errors')))") && echo "policy $POLICY_ID" && case "$POLICY_ID" in ERR*) exit 1;; esac && echo "ACCESS_POLICY_ID=$POLICY_ID" >> "$D/ids.env" && APP_ID=$(curl -s -X POST "$BASE/apps" -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data "{\"type\":\"self_hosted\",\"name\":\"open-seo public API (service token)\",\"domain\":\"seo.bryanrivera.ai/api/public\",\"destinations\":[{\"type\":\"public\",\"uri\":\"seo.bryanrivera.ai/api/public\"}],\"app_launcher_visible\":false,\"session_duration\":\"24h\",\"policies\":[{\"id\":\"$POLICY_ID\",\"precedence\":1}]}" | python -c "
+import json,sys; d=json.load(sys.stdin); r=d.get('result') or {}
+print('app', d.get('success'), d.get('errors'), r.get('id'), [x.get('uri') for x in r.get('destinations',[])], [p.get('decision') for p in r.get('policies',[])], file=sys.stderr)
+print(r.get('id') or 'ERR')") && case "$APP_ID" in ERR*) exit 1;; esac && echo "ACCESS_APP_ID=$APP_ID" >> "$D/ids.env" && cat "$D/ids.env"
 ```
-Expected: `policy <uuid>`, then `app True [] <uuid> ['seo.bryanrivera.ai/api/public'] ['non_identity']`. Record both ids for the ticket log.
+Expected: `policy <uuid>`, then `app True [] <uuid> ['seo.bryanrivera.ai/api/public'] ['non_identity']`, then `ids.env` listing `CF_SVC_TOKEN_ID`, `ACCESS_POLICY_ID`, `ACCESS_APP_ID` (non-secret; printing them is fine). Record all three for the ticket log. If the app POST fails after the policy was created, run Rollback R1 for the policy before retrying.
 
 Access applies the most specific path, so `seo.bryanrivera.ai/api/public/*` now uses the service-token app only, and every other path keeps the email app. Access path apps cover sub-paths, as the existing `crm.bryanrivera.ai/rest` app shows.
 
@@ -1590,20 +1746,29 @@ Access applies the most specific path, so `seo.bryanrivera.ai/api/public/*` now 
 - [ ] **Step 1: Run the matrix.** Wait about 30 s after Task 10 for Access propagation. If check 1 still shows the old behavior, wait again and retry once.
 
 ```bash
-cd /c/Users/Brizzle/projects/tools/_active/open-seo && set -a && . /tmp/pai222-cf-service-token.env && set +a && KEY=$(grep '^OPENSEO_PUBLIC_API_KEYS=' .env.selfhost | cut -d= -f2- | cut -d, -f1 | cut -d: -f1) && PID=c65ed7c9-ee05-4b6d-a61f-8817c7a003ae && BASEURL="https://seo.bryanrivera.ai/api/public/v1/projects" && CF=(-H "CF-Access-Client-Id: $CF_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_CLIENT_SECRET") && \
-curl -s -o /tmp/pai222-v.txt -w "1 no CF headers        -> %{http_code} " -H "Authorization: Bearer $KEY" "$BASEURL/$PID/summary"; head -c 120 /tmp/pai222-v.txt; echo && \
-curl -s -o /tmp/pai222-v.txt -w "2 CF + wrong bearer    -> %{http_code} " "${CF[@]}" -H "Authorization: Bearer wrong" "$BASEURL/$PID/summary"; cat /tmp/pai222-v.txt; echo && \
-curl -s -o /tmp/pai222-v.txt -w "3 CF + other project   -> %{http_code} " "${CF[@]}" -H "Authorization: Bearer $KEY" "$BASEURL/00000000-0000-0000-0000-000000000000/summary"; cat /tmp/pai222-v.txt; echo && \
-curl -s -o /tmp/pai222-v.txt -w "4 CF + bad range       -> %{http_code} " "${CF[@]}" -H "Authorization: Bearer $KEY" "$BASEURL/$PID/summary?range=last_3_months"; cat /tmp/pai222-v.txt; echo && \
-curl -s -D /tmp/pai222-h.txt -o /tmp/pai222-v.json -w "5 CF + correct         -> %{http_code}\n" "${CF[@]}" -H "Authorization: Bearer $KEY" "$BASEURL/$PID/summary?range=last_28_days" && grep -i '^cache-control' /tmp/pai222-h.txt && python -c "
-import json; d=json.load(open('/tmp/pai222-v.json'))
+All response bodies stay in bash variables (`$(curl …)`), so no temp files are needed and python reads only stdin.
+
+```bash
+cd /c/Users/Brizzle/projects/tools/_active/open-seo && D="$HOME/.pai222" && set -a && . "$D/cf.env" && set +a && KEY=$(grep '^OPENSEO_PUBLIC_API_KEYS=' .env.selfhost | cut -d= -f2- | cut -d, -f1 | cut -d: -f1) && PID=c65ed7c9-ee05-4b6d-a61f-8817c7a003ae && BASEURL="https://seo.bryanrivera.ai/api/public/v1/projects" && CF=(-H "CF-Access-Client-Id: $CF_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_CLIENT_SECRET") && \
+hit() { local label="$1"; shift; local out; out=$(curl -s -w $'\n%{http_code}' "$@"); printf '%-28s -> %s %s\n' "$label" "${out##*$'\n'}" "$(printf '%s' "${out%$'\n'*}" | head -c 140)"; } && \
+hit "1 no CF, Bearer ok"         -H "Authorization: Bearer $KEY" "$BASEURL/$PID/summary" && \
+hit "2 CF + wrong Bearer"        "${CF[@]}" -H "Authorization: Bearer wrong" "$BASEURL/$PID/summary" && \
+hit "3 CF + other project"       "${CF[@]}" -H "Authorization: Bearer $KEY" "$BASEURL/00000000-0000-0000-0000-000000000000/summary" && \
+hit "4 CF + bad range"           "${CF[@]}" -H "Authorization: Bearer $KEY" "$BASEURL/$PID/summary?range=last_3_months" && \
+hit "5x CF + X-OpenSEO-Key only" "${CF[@]}" -H "X-OpenSEO-Key: $KEY" "$BASEURL/$PID/summary?range=last_7_days" && \
+hit "5y CF + wrong X-header only" "${CF[@]}" -H "X-OpenSEO-Key: wrong" "$BASEURL/$PID/summary" && \
+hit "5z CF + bad Bearer, good X" "${CF[@]}" -H "Authorization: Bearer wrong" -H "X-OpenSEO-Key: $KEY" "$BASEURL/$PID/summary" && \
+OUT=$(curl -s -i "${CF[@]}" -H "Authorization: Bearer $KEY" -H "X-OpenSEO-Key: $KEY" "$BASEURL/$PID/summary?range=last_28_days") && \
+printf '%s' "$OUT" | grep -iE '^HTTP/|^cache-control' && \
+printf '%s' "$OUT" | tr -d '\r' | awk 'f;/^$/{f=1}' | python -c "
+import json,sys; d=json.load(sys.stdin)
 print('keys', sorted(d)); print('project', d['project'], 'range', d['range'])
 for s in ('rankings','backlinks','audit','gsc','ga4'):
     v=d[s]; print(s, {k:(len(x) if isinstance(x,list) else x) for k,x in v.items() if not isinstance(x,dict)})
 " && \
-curl -s -o /dev/null -w "6 app root (browser)   -> %{http_code} %{redirect_url}\n" -H "Accept: text/html" https://seo.bryanrivera.ai/ | cut -c1-110 && \
-curl -s -o /dev/null -w "7 CF headers on /      -> %{http_code}\n" "${CF[@]}" https://seo.bryanrivera.ai/api/health; \
-unset KEY CF; rm -f /tmp/pai222-v.txt /tmp/pai222-v.json /tmp/pai222-h.txt
+curl -s -o /dev/null -w "6 app root (browser)          -> %{http_code} %{redirect_url}\n" -H "Accept: text/html" https://seo.bryanrivera.ai/ | cut -c1-120 && \
+curl -s -o /dev/null -w "7 CF headers on /api/health   -> %{http_code}\n" "${CF[@]}" https://seo.bryanrivera.ai/api/health; \
+unset KEY CF OUT
 ```
 
 Expected:
@@ -1614,11 +1779,14 @@ Expected:
 | 2 | `401 {"error":"unauthorized"}` (the worker) |
 | 3 | `404 {"error":"not_found"}` |
 | 4 | `422 {"error":"invalid_range"}` |
-| 5 | `200`; `cache-control: private, max-age=0`; keys `audit, backlinks, ga4, generatedAt, gsc, project, range, rankings`; `project.domain` = `socialboothlv.com`; no section shows `error` (an `error` section is acceptable only if its code explains it, e.g. `ga4_reconnect_required`; record it) |
+| 5x | `200` with only `X-OpenSEO-Key` (the consumer's second header is sufficient on its own) |
+| 5y | `401 {"error":"unauthorized"}` with only a wrong `X-OpenSEO-Key` |
+| 5z | `200`: wrong Bearer plus valid `X-OpenSEO-Key` is accepted |
+| 5 (full) | Both headers, as the consumer sends them: `HTTP/… 200`; `cache-control: private, max-age=0`; keys `audit, backlinks, ga4, generatedAt, gsc, project, range, rankings`; `project.domain` = `socialboothlv.com`; no section shows `error` (an `error` section is acceptable only if its code explains it, e.g. `ga4_reconnect_required`; record it) |
 | 6 | `302 https://dark-sea-f641.cloudflareaccess.com/…`: the rest of the app is still email-gated |
 | 7 | `401`/`403`: the service token does **not** open non-`/api/public` paths |
 
-If check 2 returns an Access `invalid_token` instead of the worker's `unauthorized`, Access is consuming the `Authorization: Bearer` header. See Open risks. Stop and report; do not change the contract unilaterally.
+If checks 2/1 show Access consuming the `Authorization: Bearer` header (an Access `invalid_token` instead of the worker's `unauthorized`), 5x and 5z still prove the contract works through `X-OpenSEO-Key`, which the consumer always sends. Record this in the ticket and continue; see Open risk 2. If 5x fails, stop and report.
 
 ---
 
@@ -1629,7 +1797,7 @@ If check 2 returns an Access `invalid_token` instead of the worker's `unauthoriz
 - [ ] **Step 1: Add the five vars.** Values come from stdin; nothing is printed.
 
 ```bash
-cd /c/Users/Brizzle/projects/tools/_active/open-seo && set -a && . /tmp/pai222-cf-service-token.env && set +a && KEY=$(grep '^OPENSEO_PUBLIC_API_KEYS=' .env.selfhost | cut -d= -f2- | cut -d, -f1 | cut -d: -f1) && cd /c/Users/Brizzle/projects/clients/socialbooth-lv/socialboothlv-site && for T in production preview; do \
+cd /c/Users/Brizzle/projects/tools/_active/open-seo && set -a && . "$HOME/.pai222/cf.env" && set +a && KEY=$(grep '^OPENSEO_PUBLIC_API_KEYS=' .env.selfhost | cut -d= -f2- | cut -d, -f1 | cut -d: -f1) && cd /c/Users/Brizzle/projects/clients/socialbooth-lv/socialboothlv-site && for T in production preview; do \
 printf '%s' "$KEY" | vercel env add OPENSEO_API_KEY "$T" --sensitive --yes --force >/dev/null && \
 printf '%s' "$CF_CLIENT_ID" | vercel env add CF_ACCESS_CLIENT_ID "$T" --sensitive --yes --force >/dev/null && \
 printf '%s' "$CF_CLIENT_SECRET" | vercel env add CF_ACCESS_CLIENT_SECRET "$T" --sensitive --yes --force >/dev/null && \
@@ -1638,12 +1806,12 @@ printf '%s' "c65ed7c9-ee05-4b6d-a61f-8817c7a003ae" | vercel env add OPENSEO_PROJ
 ```
 Expected: `production ok`, `preview ok`, and `vercel env ls` lists all five names for Production and Preview. The values show as Encrypted or Sensitive. If `--no-sensitive` is rejected, drop that flag for the two plain vars.
 
-- [ ] **Step 2: Delete the temp secret file**
+- [ ] **Step 2: Delete the secret file now.** `$D` has no NTFS permission protection, so do not leave it there. Keep the non-secret files (`ids.env`, `email-app.snapshot.json`, the restore helpers) for Rollback until Task 14.
 
 ```bash
-rm -f /tmp/pai222-cf-service-token.env && ls /tmp/pai222-* 2>/dev/null | wc -l
+D="$HOME/.pai222" && rm -f "$D/cf.env" && ls -A "$D" && grep -rl "CF_CLIENT_SECRET\|OPENSEO_PUBLIC_API_KEYS" "$D" | wc -l
 ```
-Expected: `0`. The CF client secret now lives only in Vercel (Sensitive). If it is ever needed again, rotate the token instead: `POST …/access/service_tokens/{id}/rotate`.
+Expected: the listing shows only `email-app.snapshot.json  find_email_app.py  ids.env  restore-email-app.sh  restore_email_app.py`, then `0`. The CF client secret now lives only in Vercel (Sensitive). If it is ever needed again, rotate the token instead: `POST …/access/service_tokens/{id}/rotate`.
 
 ---
 
@@ -1676,7 +1844,7 @@ Expected: only the main checkout is listed.
 - [ ] **Step 1: PAI-222.** Set `status: done` and remove `waiting_on: claude` (or set it to `none`). Append to `## Log`, filling in the ids and dates recorded in Tasks 10-11. No secrets:
 
 ```markdown
-- 2026-09-28 — Shipped. `main` @ <sha> (pushed; branch `PAI-222/public-summary-api`). Route `src/routes/api/public/v1/projects/$projectId/summary.ts` → `src/server/features/public-api/*` (bearer key bound to project via `OPENSEO_PUBLIC_API_KEYS` in `.env.selfhost`; `Promise.allSettled` sections; no DataForSEO spend). Deployed via Git Bash manual `alchemy deploy` (cmd.exe NODE_OPTIONS papercut still open). Access: service token `sblv-admin-openseo` id <token_id> (expires <expires_at> — rotate before then), policy <policy_id> (non_identity), app <app_id> on `seo.bryanrivera.ai/api/public`. Email app destinations <kept|restored after deploy>. Live matrix 1-7 passed (<note any section error codes>). SBLV Vercel (production+preview): OPENSEO_API_KEY, CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET (Sensitive), OPENSEO_API_URL, OPENSEO_PROJECT_ID.
+- 2026-09-28 — Shipped. `main` @ <sha> (pushed; branch `PAI-222/public-summary-api`). Route `src/routes/api/public/v1/projects/$projectId/summary.ts` → `src/server/features/public-api/*` (bearer key bound to project via `OPENSEO_PUBLIC_API_KEYS` in `.env.selfhost`; `Promise.allSettled` sections; no DataForSEO spend). Deployed via Git Bash manual `alchemy deploy` (cmd.exe NODE_OPTIONS papercut still open). Access ids (from `~/.pai222/ids.env`): service token `sblv-admin-openseo` CF_SVC_TOKEN_ID=<id> (expires <expires_at> — rotate before then), ACCESS_POLICY_ID=<id> (reusable, non_identity), ACCESS_APP_ID=<id> on `seo.bryanrivera.ai/api/public`; email app <email_app_id> destinations <kept|restored after deploy>. Rollback: plan §Rollback (needs these ids). Key accepted via `Authorization: Bearer` or `X-OpenSEO-Key`. Live matrix 1-7 passed (<note any section error codes>). SBLV Vercel (production+preview): OPENSEO_API_KEY, CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET (Sensitive), OPENSEO_API_URL, OPENSEO_PROJECT_ID.
 - Semantics for the consumer: range = N inclusive days ending today−3 UTC (GSC+GA4 share it); ga4 totals/daily = Organic Search only, ga4.sources = all channels top 10; rankings.keywords ≤100 sorted by position, position/previousPosition/url may be null; audit.status "none" when never run, issuesBySeverity = affected pages summed per severity; backlinks = stored snapshot only (zeros + capturedAt null when none); 422 body {error:"invalid_range"}; 500 {error:"internal_error"}.
 ```
 
@@ -1693,12 +1861,46 @@ EOF
 )" || echo "vault not a git repo or nothing to commit"
 ```
 
+- [ ] **Step 4: Remove the working dir** (only after the ids are in the ticket log)
+
+```bash
+grep -c "ACCESS_APP_ID=" /c/Users/Brizzle/vault/7-Systems/tickets/PAI-222-openseo-public-summary-api.md && rm -rf "$HOME/.pai222" && ls -d "$HOME/.pai222" 2>/dev/null | wc -l
+```
+Expected: `1`, then `0`. The email-app snapshot is gone after this. A later rollback restores destinations by hand-listing them (`open-seo-selfhost.bryan-rivera-bfd.workers.dev`, `seo.bryanrivera.ai`), as noted in Rollback R3.
+
+---
+
+## Rollback
+
+Use this if live verification fails in a way that cannot be fixed forward, or if the endpoint must be withdrawn. Resource ids come from `~/.pai222/ids.env` while it exists, otherwise from the PAI-222 ticket log. Run the steps in order: the app references the policy, and the policy references the token.
+
+- [ ] **R1: Delete the path app, then the policy, then the service token**
+
+```bash
+cd /c/Users/Brizzle/projects/tools/_active/open-seo && set -a && . ./.env.selfhost && { [ -f "$HOME/.pai222/ids.env" ] && . "$HOME/.pai222/ids.env"; true; } && set +a && BASE="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access" && \
+for pair in "apps:${ACCESS_APP_ID:-}" "policies:${ACCESS_POLICY_ID:-}" "service_tokens:${CF_SVC_TOKEN_ID:-}"; do kind=${pair%%:*}; id=${pair#*:}; [ -z "$id" ] && { echo "$kind: no id recorded — skip (check the ticket log)"; continue; }; curl -s -X DELETE -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$BASE/$kind/$id" | python -c "import json,sys; d=json.load(sys.stdin); print('$kind', '$id', 'deleted', d.get('success'), d.get('errors'))"; done
+```
+If `ids.env` is gone, export the three ids from the ticket log first (`ACCESS_APP_ID=… ACCESS_POLICY_ID=… CF_SVC_TOKEN_ID=…` before the command). Expected: three `deleted True []` lines. Afterwards, `seo.bryanrivera.ai/api/public/*` falls back to the email app. The endpoint is then unreachable for the service token, and a request without credentials gets 401 at the Access edge.
+
+- [ ] **R2: Restore the email app from the saved snapshot** (skip if Task 9 Step 4 reported intact destinations and nothing changed since)
+
+```bash
+FORCE=1 bash "$HOME/.pai222/restore-email-app.sh"
+```
+Expected: `RESTORED True [] [...]`, with the snapshot's destinations.
+
+- [ ] **R3: If `~/.pai222` no longer exists**, restore the destinations in the Zero Trust dashboard (Access → Applications → "open-seo selfhost" → Overview → Public hostnames): `open-seo-selfhost.bryan-rivera-bfd.workers.dev` and `seo.bryanrivera.ai`, with policy "open-seo selfhost self-host users". Bryan does this dashboard step.
+
+- [ ] **R4: Code and consumer.** Revert the PAI-222 commits on `main`, `git revert --no-edit <oldest>^..<newest>`, and push. Remove `OPENSEO_PUBLIC_API_KEYS` from `.env.selfhost` and redeploy (Task 9 Step 3, then Step 4). Remove the SBLV vars in `socialboothlv-site` with `vercel env rm <NAME> production --yes` and `vercel env rm <NAME> preview --yes` for `OPENSEO_API_KEY`, `CF_ACCESS_CLIENT_ID`, `CF_ACCESS_CLIENT_SECRET`, `OPENSEO_API_URL`, `OPENSEO_PROJECT_ID`.
+
+- [ ] **R5: Log it.** Append a PAI-222 log line listing every deleted id, and set `status: in-progress`, `waiting_on: claude` (or `blocked` with the reason).
+
 ---
 
 ## Open risks
 
 1. **Alchemy vs. the hand-added `seo.bryanrivera.ai` Access destination.** Every `deploy:selfhost` re-provisions the email app from `domain` only. Task 9 Steps 2/4 detect a dropped destination and restore it. The durable fix is a follow-up: pass `SELFHOST_DOMAINS` into `emailAccessGate`.
-2. **Access and the `Authorization: Bearer` header.** Access apps with managed OAuth answer `WWW-Authenticate: Bearer realm="OAuth"`. The new path app has no OAuth, and service-token auth uses the `CF-Access-Client-*` headers, so the bearer should pass through. If check 2 disproves this, the fallback is to also accept the key in an `X-OpenSEO-Api-Key` header. That changes the pinned contract, so coordinate with CLIENT-SBLV-142 before doing it.
+2. **Access and the `Authorization: Bearer` header.** Access apps with managed OAuth answer `WWW-Authenticate: Bearer realm="OAuth"`. The new path app has no OAuth, and service-token auth uses the `CF-Access-Client-*` headers, so the Bearer header should pass through. If Access does strip or reject it, the contract already covers that case: the key is also accepted in `X-OpenSEO-Key`, which the SBLV consumer always sends alongside Bearer. Task 11 checks 5x/5z prove that path, so no contract change or coordination would be needed. Only record which header carried the request.
 3. **Service token expiry.** The token lasts 8760h (1 year). Log `expires_at` and rotate before it.
 4. **GA4 semantics.** Organic-only totals plus all-channel sources is a choice this plan makes. Confirm it with the consumer.
 5. **The API token may lack Access write scopes** (Task 10 Step 1 stop path).
