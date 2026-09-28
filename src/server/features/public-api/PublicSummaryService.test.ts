@@ -1,3 +1,4 @@
+/* eslint-disable max-lines, max-lines-per-function */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Ga4ReportError } from "@/server/lib/ga4Errors";
 import {
@@ -248,6 +249,7 @@ describe("PublicSummaryService.getSummary", () => {
         totals: { clicks: 3, impressions: 100, ctr: 0.03, position: 8 },
         prevTotals: { clicks: 3, impressions: 100, ctr: 0.03, position: 8 },
         // Dense fill adds zero rows; use arrayContaining to find the data point.
+        // oxlint-disable-next-line typescript/no-unsafe-assignment -- vitest matcher
         daily: expect.arrayContaining([
           { date: "2026-09-24", clicks: 3, impressions: 100 },
         ]),
@@ -275,6 +277,7 @@ describe("PublicSummaryService.getSummary", () => {
           engagementRate: 0.5,
           keyEvents: 1,
         },
+        // oxlint-disable-next-line typescript/no-unsafe-assignment -- vitest matcher
         daily: expect.arrayContaining([{ date: "2026-09-24", sessions: 5 }]),
         sources: [{ source: "google", medium: "organic", sessions: 30 }],
       },

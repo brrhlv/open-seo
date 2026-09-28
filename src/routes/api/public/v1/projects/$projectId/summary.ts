@@ -22,13 +22,11 @@ export const Route = createFileRoute(
         request: Request;
         params: { projectId: string };
       }) => {
-        if (isHostedAuthMode(env.AUTH_MODE)) {
-          return new Response("Not found", { status: 404 });
-        }
         return handlePublicSummaryRequest({
           request,
           projectId: params.projectId,
           rawKeys: env.OPENSEO_PUBLIC_API_KEYS,
+          isHosted: isHostedAuthMode(env.AUTH_MODE),
         });
       },
     },
