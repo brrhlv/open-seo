@@ -60,7 +60,7 @@ describe("resolveBoundProjects", () => {
     ).toEqual(["proj-a"]);
   });
 
-  it.each([
+  it.each<Record<string, string>>([
     {},
     { authorization: KEY_A },
     { authorization: `Basic ${KEY_A}` },
