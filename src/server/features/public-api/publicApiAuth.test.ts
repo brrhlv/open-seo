@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   parsePublicApiKeys,
   resolveBoundProjects,
@@ -44,6 +44,20 @@ describe("parsePublicApiKeys", () => {
     expect(parsePublicApiKeys(`${K}:org:proj-id`)).toEqual([
       { key: K, projectId: "org:proj-id" },
     ]);
+  });
+
+  it("caches the parse result and warns at most once per distinct secret", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // Unique string not used elsewhere so the module-level cache is cold.
+    const MEMO_KEY = "m".repeat(64);
+    const raw = `${MEMO_KEY}:proj-m,short:dropped`; // 1 valid + 1 malformed
+    const first = parsePublicApiKeys(raw);
+    const second = parsePublicApiKeys(raw);
+    // Exact same array reference (cached).
+    expect(second).toBe(first);
+    // Warned only once (second call is a cache hit, no re-parse).
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
   });
 });
 

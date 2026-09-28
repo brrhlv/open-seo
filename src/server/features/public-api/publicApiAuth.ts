@@ -13,12 +13,18 @@ const MAX_PRESENTED_KEY_LENGTH = 256;
 // always a mis-paste — fail closed at parse time.
 const VALID_KEY_RE = /^[A-Za-z0-9_-]+$/;
 
+// Cache parsed key arrays by raw secret string so the warning fires exactly
+// once per distinct secret value (Workers restart clears it; that's fine).
+const _keyCache = new Map<string, PublicApiKey[]>();
+
 /** OPENSEO_PUBLIC_API_KEYS = "key:projectId[,key:projectId]". Entries missing
  *  either half, with a short key, with invalid key chars, or where the same key
  *  maps to more than one project are silently dropped (fail closed). Logs only
  *  the count of dropped entries, never any values. */
 export function parsePublicApiKeys(raw: string | undefined): PublicApiKey[] {
   if (!raw) return [];
+  const cached = _keyCache.get(raw);
+  if (cached) return cached;
   let dropped = 0;
   const candidates: PublicApiKey[] = [];
 
@@ -57,6 +63,7 @@ export function parsePublicApiKeys(raw: string | undefined): PublicApiKey[] {
     );
   }
 
+  _keyCache.set(raw, keys);
   return keys;
 }
 
