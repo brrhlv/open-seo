@@ -60,6 +60,7 @@ import { Route as ProjectPProjectIdAuditIndexRouteImport } from './routes/_proje
 import { Route as ProjectPProjectIdSettingsIntegrationsRouteImport } from './routes/_project/p/$projectId/settings/integrations'
 import { Route as ProjectPProjectIdSettingsContextRouteImport } from './routes/_project/p/$projectId/settings/context'
 import { Route as ProjectPProjectIdRankTrackingConfigIdRouteImport } from './routes/_project/p/$projectId/rank-tracking/$configId'
+import { Route as ApiPublicV1ProjectsProjectIdSummaryRouteImport } from './routes/api/public/v1/projects/$projectId/summary'
 import { Route as ProjectPProjectIdAuditIssuesResultIdRouteImport } from './routes/_project/p/$projectId/audit/issues/$resultId'
 
 const VerifyEmailRoute = VerifyEmailRouteImport.update({
@@ -330,6 +331,12 @@ const ProjectPProjectIdRankTrackingConfigIdRoute =
     path: '/$configId',
     getParentRoute: () => ProjectPProjectIdRankTrackingRoute,
   } as any)
+const ApiPublicV1ProjectsProjectIdSummaryRoute =
+  ApiPublicV1ProjectsProjectIdSummaryRouteImport.update({
+    id: '/api/public/v1/projects/$projectId/summary',
+    path: '/api/public/v1/projects/$projectId/summary',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ProjectPProjectIdAuditIssuesResultIdRoute =
   ProjectPProjectIdAuditIssuesResultIdRouteImport.update({
     id: '/issues/$resultId',
@@ -386,6 +393,7 @@ export interface FileRoutesByFullPath {
   '/p/$projectId/rank-tracking/': typeof ProjectPProjectIdRankTrackingIndexRoute
   '/p/$projectId/settings/': typeof ProjectPProjectIdSettingsIndexRoute
   '/p/$projectId/audit/issues/$resultId': typeof ProjectPProjectIdAuditIssuesResultIdRoute
+  '/api/public/v1/projects/$projectId/summary': typeof ApiPublicV1ProjectsProjectIdSummaryRoute
 }
 export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
@@ -431,6 +439,7 @@ export interface FileRoutesByTo {
   '/p/$projectId/rank-tracking': typeof ProjectPProjectIdRankTrackingIndexRoute
   '/p/$projectId/settings': typeof ProjectPProjectIdSettingsIndexRoute
   '/p/$projectId/audit/issues/$resultId': typeof ProjectPProjectIdAuditIssuesResultIdRoute
+  '/api/public/v1/projects/$projectId/summary': typeof ApiPublicV1ProjectsProjectIdSummaryRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -486,6 +495,7 @@ export interface FileRoutesById {
   '/_project/p/$projectId/rank-tracking/': typeof ProjectPProjectIdRankTrackingIndexRoute
   '/_project/p/$projectId/settings/': typeof ProjectPProjectIdSettingsIndexRoute
   '/_project/p/$projectId/audit/issues/$resultId': typeof ProjectPProjectIdAuditIssuesResultIdRoute
+  '/api/public/v1/projects/$projectId/summary': typeof ApiPublicV1ProjectsProjectIdSummaryRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -538,6 +548,7 @@ export interface FileRouteTypes {
     | '/p/$projectId/rank-tracking/'
     | '/p/$projectId/settings/'
     | '/p/$projectId/audit/issues/$resultId'
+    | '/api/public/v1/projects/$projectId/summary'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -583,6 +594,7 @@ export interface FileRouteTypes {
     | '/p/$projectId/rank-tracking'
     | '/p/$projectId/settings'
     | '/p/$projectId/audit/issues/$resultId'
+    | '/api/public/v1/projects/$projectId/summary'
   id:
     | '__root__'
     | '/_app'
@@ -637,6 +649,7 @@ export interface FileRouteTypes {
     | '/_project/p/$projectId/rank-tracking/'
     | '/_project/p/$projectId/settings/'
     | '/_project/p/$projectId/audit/issues/$resultId'
+    | '/api/public/v1/projects/$projectId/summary'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -655,6 +668,7 @@ export interface RootRouteChildren {
   ApiAutumnSplatRoute: typeof ApiAutumnSplatRoute
   ApiGa4OauthCallbackRoute: typeof ApiGa4OauthCallbackRoute
   ApiGscOauthCallbackRoute: typeof ApiGscOauthCallbackRoute
+  ApiPublicV1ProjectsProjectIdSummaryRoute: typeof ApiPublicV1ProjectsProjectIdSummaryRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -1016,6 +1030,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectPProjectIdRankTrackingConfigIdRouteImport
       parentRoute: typeof ProjectPProjectIdRankTrackingRoute
     }
+    '/api/public/v1/projects/$projectId/summary': {
+      id: '/api/public/v1/projects/$projectId/summary'
+      path: '/api/public/v1/projects/$projectId/summary'
+      fullPath: '/api/public/v1/projects/$projectId/summary'
+      preLoaderRoute: typeof ApiPublicV1ProjectsProjectIdSummaryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_project/p/$projectId/audit/issues/$resultId': {
       id: '/_project/p/$projectId/audit/issues/$resultId'
       path: '/issues/$resultId'
@@ -1220,6 +1241,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAutumnSplatRoute: ApiAutumnSplatRoute,
   ApiGa4OauthCallbackRoute: ApiGa4OauthCallbackRoute,
   ApiGscOauthCallbackRoute: ApiGscOauthCallbackRoute,
+  ApiPublicV1ProjectsProjectIdSummaryRoute:
+    ApiPublicV1ProjectsProjectIdSummaryRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
