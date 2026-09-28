@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Ga4ReportError } from "@/server/lib/ga4Errors";
-import { GscApiError, GscNotConnectedError } from "@/server/lib/gscErrors";
+import {
+  GscApiError,
+  GscNotConnectedError,
+  GscTokenError,
+} from "@/server/lib/gscErrors";
 import { PublicSummaryService } from "./PublicSummaryService";
 
 const mocks = vi.hoisted(() => ({
@@ -243,7 +247,10 @@ describe("PublicSummaryService.getSummary", () => {
         connected: true,
         totals: { clicks: 3, impressions: 100, ctr: 0.03, position: 8 },
         prevTotals: { clicks: 3, impressions: 100, ctr: 0.03, position: 8 },
-        daily: [{ date: "2026-09-24", clicks: 3, impressions: 100 }],
+        // Dense fill adds zero rows; use arrayContaining to find the data point.
+        daily: expect.arrayContaining([
+          { date: "2026-09-24", clicks: 3, impressions: 100 },
+        ]),
         topQueries: [
           {
             query: "photo booth",
@@ -268,9 +275,202 @@ describe("PublicSummaryService.getSummary", () => {
           engagementRate: 0.5,
           keyEvents: 1,
         },
-        daily: [{ date: "2026-09-24", sessions: 5 }],
+        daily: expect.arrayContaining([{ date: "2026-09-24", sessions: 5 }]),
         sources: [{ source: "google", medium: "organic", sessions: 30 }],
       },
+    });
+  });
+
+  it("calls GSC getPerformance with the previous-period window for prevTotals", async () => {
+    mocks.getPerformance.mockResolvedValue({ rows: [] });
+    mocks.getOrganicOverview.mockResolvedValue({
+      current: {},
+      previous: {},
+      trend: [],
+    });
+    mocks.runReport.mockResolvedValue({ rows: [] });
+    await PublicSummaryService.getSummary(input); // last_28_days, NOW=2026-09-28
+    // Promise.all fires calls in order: current-date, prev-date, current-query.
+    expect(mocks.getPerformance).toHaveBeenCalledTimes(3);
+    expect(mocks.getPerformance).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        startDate: "2026-08-01",
+        endDate: "2026-08-28",
+      }),
+    );
+    // GA4 overview called with the current window dates.
+    expect(mocks.getOrganicOverview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        startDate: "2026-08-29",
+        endDate: "2026-09-25",
+      }),
+    );
+  });
+
+  it("treats GscApiError(403) and GscTokenError as connected:false", async () => {
+    mocks.getPerformance.mockRejectedValue(new GscApiError(403, "Forbidden"));
+    const r1 = await PublicSummaryService.getSummary(input);
+    expect(r1?.gsc).toEqual({ connected: false });
+
+    mocks.getPerformance.mockRejectedValue(new GscTokenError("revoked"));
+    const r2 = await PublicSummaryService.getSummary(input);
+    expect(r2?.gsc).toEqual({ connected: false });
+  });
+
+  it("turns GSC 429 into gsc_quota_exhausted (not connected:false)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.getPerformance.mockRejectedValue(
+      new GscApiError(429, "Too Many Requests"),
+    );
+    const r = await PublicSummaryService.getSummary(input);
+    expect(r?.gsc).toEqual({ error: "gsc_quota_exhausted" });
+  });
+
+  it("turns ga4_reconnect_required into a section error, not connected:false", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.getOrganicOverview.mockRejectedValue(
+      new Ga4ReportError("ga4_reconnect_required", "reconnect required"),
+    );
+    mocks.runReport.mockResolvedValue({ rows: [] });
+    const r = await PublicSummaryService.getSummary(input);
+    expect(r?.ga4).toEqual({ error: "ga4_reconnect_required" });
+  });
+
+  it("includes one entry per non-null device×keyword and sorts nulls last", async () => {
+    mocks.getConfigsForProject.mockResolvedValue([{ id: "cfg-1" }]);
+    mocks.getLatestResults.mockResolvedValue({
+      rows: [
+        {
+          keyword: "both-devices",
+          desktop: {
+            position: 5,
+            previousPosition: 8,
+            rankingUrl: "https://example.com/d",
+          },
+          mobile: {
+            position: null,
+            previousPosition: 10,
+            rankingUrl: null,
+          },
+        },
+        {
+          keyword: "fully-unranked",
+          desktop: { position: null, previousPosition: null, rankingUrl: null },
+          mobile: { position: null, previousPosition: null, rankingUrl: null },
+        },
+      ],
+      run: { lastCheckedAt: null },
+    });
+    const r = await PublicSummaryService.getSummary(input);
+    if (!r || "error" in r.rankings) throw new Error("unexpected");
+    // 2 rows but fully-unranked has no device entries → 2 keyword×device entries
+    expect(r.rankings.trackedKeywords).toBe(2);
+    expect(r.rankings.keywords).toHaveLength(2);
+    // desktop pos 5 sorts before mobile pos null
+    expect(r.rankings.keywords[0]).toMatchObject({
+      keyword: "both-devices",
+      device: "desktop",
+      position: 5,
+    });
+    expect(r.rankings.keywords[1]).toMatchObject({
+      keyword: "both-devices",
+      device: "mobile",
+      position: null,
+    });
+  });
+
+  it("processes at most 5 tracking configs (cuts off the 6th)", async () => {
+    mocks.getConfigsForProject.mockResolvedValue(
+      Array.from({ length: 6 }, (_, i) => ({ id: `cfg-${i}` })),
+    );
+    mocks.getLatestResults.mockResolvedValue({ rows: [], run: null });
+    await PublicSummaryService.getSummary(input);
+    expect(mocks.getLatestResults).toHaveBeenCalledTimes(5);
+  });
+
+  it("uses the correct rank compare period for each range", async () => {
+    const r7 = await PublicSummaryService.getSummary({
+      projectId: "proj-a",
+      range: "last_7_days",
+      now: NOW,
+    });
+    expect(r7?.rankings).toMatchObject({ comparedTo: "7d" });
+    expect(mocks.getLatestResults).not.toHaveBeenCalled(); // no configs
+
+    const r90 = await PublicSummaryService.getSummary({
+      projectId: "proj-a",
+      range: "last_90_days",
+      now: NOW,
+    });
+    expect(r90?.rankings).toMatchObject({ comparedTo: "90d" });
+  });
+
+  it("fills daily gaps with zeros for both GSC and GA4", async () => {
+    // last_7_days: start=2026-09-19, end=2026-09-25 → 7 dates
+    mocks.getPerformance.mockImplementation(
+      async ({
+        dimensions,
+        startDate,
+      }: {
+        dimensions: string[];
+        startDate: string;
+      }) => ({
+        rows:
+          dimensions[0] === "date" && startDate === "2026-09-19"
+            ? [
+                {
+                  keys: ["2026-09-22"],
+                  clicks: 10,
+                  impressions: 200,
+                  ctr: 0.05,
+                  position: 5,
+                },
+              ]
+            : [],
+      }),
+    );
+    mocks.getOrganicOverview.mockResolvedValue({
+      current: {
+        sessions: 20,
+        activeUsers: 15,
+        engagementRate: 0.5,
+        keyEvents: 1,
+      },
+      previous: {},
+      trend: [{ date: "20260922", sessions: 8 }],
+    });
+    mocks.runReport.mockResolvedValue({ rows: [] });
+
+    const r = await PublicSummaryService.getSummary({
+      projectId: "proj-a",
+      range: "last_7_days",
+      now: NOW,
+    });
+
+    expect(r?.gsc).toMatchObject({
+      connected: true,
+      daily: [
+        { date: "2026-09-19", clicks: 0, impressions: 0 },
+        { date: "2026-09-20", clicks: 0, impressions: 0 },
+        { date: "2026-09-21", clicks: 0, impressions: 0 },
+        { date: "2026-09-22", clicks: 10, impressions: 200 },
+        { date: "2026-09-23", clicks: 0, impressions: 0 },
+        { date: "2026-09-24", clicks: 0, impressions: 0 },
+        { date: "2026-09-25", clicks: 0, impressions: 0 },
+      ],
+    });
+    expect(r?.ga4).toMatchObject({
+      connected: true,
+      daily: [
+        { date: "2026-09-19", sessions: 0 },
+        { date: "2026-09-20", sessions: 0 },
+        { date: "2026-09-21", sessions: 0 },
+        { date: "2026-09-22", sessions: 8 },
+        { date: "2026-09-23", sessions: 0 },
+        { date: "2026-09-24", sessions: 0 },
+        { date: "2026-09-25", sessions: 0 },
+      ],
     });
   });
 });

@@ -42,6 +42,43 @@ type SummaryDates = { start: string; end: string };
 type SectionError = { error: string };
 type Ga4Row = Record<string, string | number | null> | null | undefined;
 
+/** All UTC dates in [start, end] inclusive (YYYY-MM-DD), for dense fill. */
+function dateRange(start: string, end: string): string[] {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const startMs = Date.parse(`${start}T00:00:00Z`);
+  const endMs = Date.parse(`${end}T00:00:00Z`);
+  const dates: string[] = [];
+  for (let ms = startMs; ms <= endMs; ms += dayMs) {
+    dates.push(new Date(ms).toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
+/** GSC daily rows dense-filled with zeros for every date in the window. */
+function fillGscDaily(
+  rows: { date: string; clicks: number; impressions: number }[],
+  dates: SummaryDates,
+): { date: string; clicks: number; impressions: number }[] {
+  const byDate = new Map(rows.map((r) => [r.date, r]));
+  return dateRange(dates.start, dates.end).map((date) => ({
+    date,
+    clicks: byDate.get(date)?.clicks ?? 0,
+    impressions: byDate.get(date)?.impressions ?? 0,
+  }));
+}
+
+/** GA4 daily rows dense-filled with zeros for every date in the window. */
+function fillGa4Daily(
+  rows: { date: string; sessions: number }[],
+  dates: SummaryDates,
+): { date: string; sessions: number }[] {
+  const byDate = new Map(rows.map((r) => [r.date, r]));
+  return dateRange(dates.start, dates.end).map((date) => ({
+    date,
+    sessions: byDate.get(date)?.sessions ?? 0,
+  }));
+}
+
 /** SQLite defaults store "YYYY-MM-DD HH:MM:SS" (UTC); Postgres and app writes
  *  store ISO. The wire contract is ISO. */
 function toIsoTimestamp(value: string | null | undefined): string | null {
@@ -204,16 +241,17 @@ async function getGsc(projectId: string, dates: SummaryDates) {
         rowLimit: TOP_QUERY_LIMIT,
       }),
     ]);
+    const rawDaily = current.rows.flatMap((row) => {
+      const date = row.keys?.[0];
+      return date
+        ? [{ date, clicks: row.clicks, impressions: row.impressions }]
+        : [];
+    });
     return {
       connected: true as const,
       totals: sumSearchTotals(current.rows),
       prevTotals: sumSearchTotals(previous.rows),
-      daily: current.rows.flatMap((row) => {
-        const date = row.keys?.[0];
-        return date
-          ? [{ date, clicks: row.clicks, impressions: row.impressions }]
-          : [];
-      }),
+      daily: fillGscDaily(rawDaily, dates),
       topQueries: toDimensionRows(queries.rows).map(({ key, ...values }) => ({
         query: key,
         ...values,
@@ -257,10 +295,13 @@ async function getGa4(projectId: string, dates: SummaryDates) {
       connected: true as const,
       totals: ga4Totals(overview.current),
       prevTotals: ga4Totals(overview.previous),
-      daily: overview.trend.map((row) => ({
-        date: toIsoDate(String(row.date ?? "")),
-        sessions: metric(row.sessions),
-      })),
+      daily: fillGa4Daily(
+        overview.trend.map((row) => ({
+          date: toIsoDate(String(row.date ?? "")),
+          sessions: metric(row.sessions),
+        })),
+        dates,
+      ),
       sources: sources.rows.map((row) => ({
         ...splitSourceMedium(String(row.sessionSourceMedium ?? "")),
         sessions: metric(row.sessions),
