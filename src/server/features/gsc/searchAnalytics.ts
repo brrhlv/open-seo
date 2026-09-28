@@ -38,7 +38,7 @@ export const GSC_DEFAULT_ROW_LIMIT = 1000;
 // the agent paginates with `startRow` for more.
 export const GSC_MAX_ROW_LIMIT = 1000;
 // GSC data trails by ~2-3 days; default the end of convenience ranges before it.
-const GSC_DATA_LAG_DAYS = 3;
+export const GSC_DATA_LAG_DAYS = 3;
 
 export type GscDimension = (typeof GSC_DIMENSIONS)[number];
 type GscFilterOperator = (typeof GSC_FILTER_OPERATORS)[number];

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ComparePeriod } from "@/types/schemas/rank-tracking";
+import { GSC_DATA_LAG_DAYS } from "@/server/features/gsc/searchAnalytics";
 
 const publicSummaryRangeSchema = z.enum([
   "last_7_days",
@@ -21,10 +22,9 @@ export const RANK_COMPARE_PERIOD: Record<PublicSummaryRange, ComparePeriod> = {
   last_90_days: "90d",
 };
 
-// GSC data trails ~2-3 days (searchAnalytics.ts GSC_DATA_LAG_DAYS). Ending the
-// GSC and GA4 windows on the same lagged day keeps both sources on identical
-// dates in one response.
-const DATA_LAG_DAYS = 3;
+// GSC data trails ~2-3 days. Ending the GSC and GA4 windows on the same lagged
+// day keeps both sources on identical dates in one response.
+const DATA_LAG_DAYS = GSC_DATA_LAG_DAYS;
 
 /** Absent (`null`) → the default; anything unsupported → null (HTTP 422). */
 export function parsePublicSummaryRange(
