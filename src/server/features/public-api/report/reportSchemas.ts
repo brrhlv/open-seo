@@ -12,7 +12,9 @@ const ga4Int = z.union([
   z.string().regex(/^\d+$/),
 ]);
 
-/** R1 — GA4 Data API runReport without `property`. */
+/** R1 — GA4 Data API runReport without `property`.
+ *  startDate / endDate accept GA4 relative dates (NdaysAgo / today /
+ *  yesterday) as-is — GA4 interprets them server-side. */
 export const ga4RunReportBodySchema = z.strictObject({
   dateRanges: z
     .array(
@@ -74,7 +76,13 @@ export const gscSearchAnalyticsBodySchema = z.strictObject({
         filters: z
           .array(
             z.strictObject({
-              dimension: z.string().min(1),
+              dimension: z.enum([
+                "query",
+                "page",
+                "country",
+                "device",
+                "searchAppearance",
+              ]),
               operator: z
                 .enum([
                   "equals",

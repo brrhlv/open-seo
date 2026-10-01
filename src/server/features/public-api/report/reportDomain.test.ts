@@ -11,6 +11,7 @@ describe("isUrlWithinDomain", () => {
     ["https://evilsocialboothlv.com/", false],
     ["https://socialboothlv.com.evil.io/", false],
     ["https://user:pw@socialboothlv.com/", false],
+    ["https://socialboothlv.com:8080/", false],
     ["ftp://socialboothlv.com/", false],
     ["javascript:alert(1)", false],
     ["not a url", false],
