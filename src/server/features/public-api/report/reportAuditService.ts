@@ -44,15 +44,17 @@ async function readTbtMs(r2Key: string | null): Promise<number | null> {
   }
 }
 
-/** The homepage's mobile result, else the shallowest page's, else null. */
+/** The homepage's mobile result, else the shallowest page's, else null.
+ *  Sorted by [crawlDepth asc (nulls last), url asc] BEFORE the homepage
+ *  filter so the pick is deterministic when several rows share path "/". */
 async function pickLighthouse(rows: LighthouseRow[]) {
+  const sorted = sortBy(
+    rows,
+    (candidate) => candidate.crawlDepth ?? Number.MAX_SAFE_INTEGER,
+    (candidate) => candidate.url,
+  );
   const row =
-    rows.find((candidate) => isHomepage(candidate.url)) ??
-    sortBy(
-      rows,
-      (candidate) => candidate.crawlDepth ?? Number.MAX_SAFE_INTEGER,
-      (candidate) => candidate.url,
-    )[0];
+    sorted.find((candidate) => isHomepage(candidate.url)) ?? sorted[0];
   if (!row) return null;
   const tbtMs = await readTbtMs(row.r2Key);
   return {

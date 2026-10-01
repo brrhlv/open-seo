@@ -216,6 +216,8 @@ export async function getSnapshotsBeforeDate(
  * only some keywords) for a config whose completed_at is at or before
  * `cutoff`. The app writes completed_at as ISO; the ISO end-of-day cutoff also
  * orders correctly against SQLite "YYYY-MM-DD HH:MM:SS" text.
+ * started_at (SQLite text format) is never used for ordering here; ordering
+ * is by completedAt (ISO).
  */
 export async function getLatestCompletedFullRunAtOrBefore(
   configId: string,

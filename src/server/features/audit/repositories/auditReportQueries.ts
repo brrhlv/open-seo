@@ -40,7 +40,9 @@ export async function getLatestAuditAtOrBefore(
 }
 
 /** Successful mobile Lighthouse results for an audit, with page URL + depth.
- *  `r2Key` points at the stored payload (the only place TBT is kept). */
+ *  `r2Key` points at the stored payload (the only place TBT is kept).
+ *  started_at (SQLite text format) is never used for ordering here; the
+ *  service sorts by crawlDepth and url, not by any timestamp. */
 export async function getMobileLighthouseForAudit(auditId: string) {
   return db
     .select({

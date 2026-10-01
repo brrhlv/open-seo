@@ -122,6 +122,18 @@ describe("ReportAuditService.getAudit", () => {
     ]);
   });
 
+  it("picks the homepage deterministically when two homepage rows arrive in reverse url order", async () => {
+    // Both https://www.socialboothlv.com/ and https://socialboothlv.com/ are
+    // homepages. Sorted by [crawlDepth asc (nulls last), url asc], the
+    // www-less form comes last alphabetically; the shorter url wins.
+    mocks.getMobileLighthouseForAudit.mockResolvedValue([
+      lighthouse("https://www.socialboothlv.com/", 0, 60),
+      lighthouse("https://socialboothlv.com/", 0, 78),
+    ]);
+    const result = await ReportAuditService.getAudit(ctx());
+    expect(result.lighthouse?.url).toBe("https://socialboothlv.com/");
+  });
+
   it.each<[string, ReturnType<typeof lighthouse>[], string | null]>([
     [
       "no homepage → shallowest page",
