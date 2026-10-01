@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { AppError } from "@/server/lib/errors";
-import { Ga4DataApiError, Ga4TokenError } from "@/server/lib/ga4Errors";
+import {
+  Ga4DataApiError,
+  Ga4MalformedResponseError,
+  Ga4TokenError,
+} from "@/server/lib/ga4Errors";
 import {
   GscApiError,
   GscNotConnectedError,
@@ -56,6 +60,12 @@ describe("toReportApiError", () => {
       { error: "upstream_error", status: 0 },
     ],
     ["anything else", new Error("boom"), 500, { error: "internal_error" }],
+    [
+      "GA4 malformed response",
+      new Ga4MalformedResponseError(),
+      502,
+      { error: "upstream_error", status: 0 },
+    ],
   ])("maps %s", (_label, error, status, body) => {
     expect(wire(toReportApiError(error))).toEqual([status, body]);
   });

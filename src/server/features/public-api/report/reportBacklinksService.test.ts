@@ -196,6 +196,24 @@ describe("ReportBacklinksService.runBacklinksReport", () => {
     });
   });
 
+  it("skips the snapshot for a non-dashboard-equivalent summary (backlinks_status_type lost)", async () => {
+    await expect(run({ backlinks_status_type: "lost" })).resolves.toMatchObject(
+      {
+        target: "socialboothlv.com",
+      },
+    );
+    expect(mocks.insert).not.toHaveBeenCalled();
+    expect(mocks.updateById).not.toHaveBeenCalled();
+  });
+
+  it("still returns 200 with the raw task when the snapshot insert throws", async () => {
+    mocks.insert.mockRejectedValue(new Error("D1 busy"));
+    await expect(run({})).resolves.toMatchObject({
+      target: "socialboothlv.com",
+      response: SUMMARY_TASK,
+    });
+  });
+
   it.each<[string, () => void, number, Record<string, unknown>]>([
     [
       "an HTTP 429",

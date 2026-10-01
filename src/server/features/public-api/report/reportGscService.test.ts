@@ -74,7 +74,7 @@ describe("ReportGscService", () => {
     expect(mocks.querySearchAnalytics).toHaveBeenCalledWith(SITE, body);
   });
 
-  it("R2 rejects a rowLimit over 25000", async () => {
+  it("R2 rejects a rowLimit over 25000 without calling Google", async () => {
     await expect(
       ReportGscService.querySearchAnalytics(
         ctx({
@@ -84,6 +84,7 @@ describe("ReportGscService", () => {
         }),
       ),
     ).rejects.toMatchObject({ httpStatus: 422 });
+    expect(mocks.querySearchAnalytics).not.toHaveBeenCalled();
   });
 
   it("maps a transport failure (fetch rejection) to 502 upstream_error status 0", async () => {

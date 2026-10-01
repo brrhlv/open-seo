@@ -1,5 +1,9 @@
 import { AppError } from "@/server/lib/errors";
-import { Ga4DataApiError, Ga4TokenError } from "@/server/lib/ga4Errors";
+import {
+  Ga4DataApiError,
+  Ga4MalformedResponseError,
+  Ga4TokenError,
+} from "@/server/lib/ga4Errors";
 import {
   GscApiError,
   GscNotConnectedError,
@@ -58,6 +62,10 @@ export function toReportApiError(error: unknown): ReportApiError {
   }
   if (error instanceof GscApiError || error instanceof Ga4DataApiError) {
     return fromUpstreamStatus(error.status);
+  }
+  // An unparseable GA4 response body: treat like a transport failure.
+  if (error instanceof Ga4MalformedResponseError) {
+    return new ReportApiError(502, "upstream_error", { status: 0 });
   }
   return new ReportApiError(500, "internal_error");
 }

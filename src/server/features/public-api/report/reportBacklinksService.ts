@@ -18,8 +18,25 @@ function toHundredScale(rank: number | null | undefined): number | null {
   return typeof rank === "number" ? Math.round(rank / 10) : null;
 }
 
+/** True when the summary request uses the same parameters the dashboard
+ *  collector uses: all live backlinks, indirect links included. Requests that
+ *  filter to a subset (lost only, no indirect links, etc.) must not overwrite
+ *  the snapshot row because it would corrupt OpenSEO's own history chart. */
+function isDashboardEquivalentSummary(body: Record<string, unknown>): boolean {
+  if (body.include_subdomains === false) return false;
+  if (body.include_indirect_links === false) return false;
+  if (
+    body.backlinks_status_type !== undefined &&
+    body.backlinks_status_type !== "live"
+  )
+    return false;
+  return true;
+}
+
 /** One backlink_snapshots row per project per UTC day, so OpenSEO's own
- *  history grows monthly even when nobody opens the dashboard. */
+ *  history grows monthly even when nobody opens the dashboard. Concurrent
+ *  same-day calls can each read no row and both insert — accepted, same as
+ *  the dashboard. */
 async function recordSummarySnapshot(
   projectId: string,
   domain: string,
@@ -97,7 +114,10 @@ async function runBacklinksReport(
     });
   }
 
-  if (kind === "summary") {
+  if (
+    kind === "summary" &&
+    isDashboardEquivalentSummary(body as Record<string, unknown>)
+  ) {
     try {
       await recordSummarySnapshot(ctx.project.id, domain, task, now);
     } catch (error) {
