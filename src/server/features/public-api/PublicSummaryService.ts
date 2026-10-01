@@ -25,6 +25,7 @@ import {
   resolvePublicSummaryDates,
   type PublicSummaryRange,
 } from "./publicSummaryRange";
+import { toIsoTimestamp } from "./timestamps";
 
 // Read-only project summary for external dashboards (PAI-222). Every read is
 // D1 or first-party Google data — never a DataForSEO-metered path (no
@@ -77,17 +78,6 @@ function fillGa4Daily(
     date,
     sessions: byDate.get(date)?.sessions ?? 0,
   }));
-}
-
-/** SQLite defaults store "YYYY-MM-DD HH:MM:SS" (UTC); Postgres and app writes
- *  store ISO. The wire contract is ISO. */
-function toIsoTimestamp(value: string | null | undefined): string | null {
-  if (!value) return null;
-  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)
-    ? `${value.replace(" ", "T")}Z`
-    : value;
-  const ms = Date.parse(normalized);
-  return Number.isNaN(ms) ? value : new Date(ms).toISOString();
 }
 
 /** GA4 `date` dimension values are YYYYMMDD. */
