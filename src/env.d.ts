@@ -62,8 +62,10 @@ declare namespace Cloudflare {
     OPENROUTER_API_KEY?: string;
     // Optional OpenRouter model slug override (defaults in openrouter.ts).
     OPENROUTER_MODEL?: string;
-    // Read-only public summary API keys, "key:projectId[,key:projectId]"
-    // (src/server/features/public-api). Unset = every request is 401.
+    // Read-only public API keys (summary + BRRHLV-375 report routes),
+    // "key:projectId[,key:projectId]" (src/server/features/public-api).
+    // A project may have several keys; a key maps to exactly one project.
+    // Unset = every request is 401.
     OPENSEO_PUBLIC_API_KEYS?: string;
   }
 }

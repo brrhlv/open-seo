@@ -62,6 +62,13 @@ import { Route as ProjectPProjectIdSettingsContextRouteImport } from './routes/_
 import { Route as ProjectPProjectIdRankTrackingConfigIdRouteImport } from './routes/_project/p/$projectId/rank-tracking/$configId'
 import { Route as ApiPublicV1ProjectsProjectIdSummaryRouteImport } from './routes/api/public/v1/projects/$projectId/summary'
 import { Route as ProjectPProjectIdAuditIssuesResultIdRouteImport } from './routes/_project/p/$projectId/audit/issues/$resultId'
+import { Route as ApiPublicV1ProjectsProjectIdReportRankingsRouteImport } from './routes/api/public/v1/projects/$projectId/report/rankings'
+import { Route as ApiPublicV1ProjectsProjectIdReportAuditRouteImport } from './routes/api/public/v1/projects/$projectId/report/audit'
+import { Route as ApiPublicV1ProjectsProjectIdReportGscSitemapsRouteImport } from './routes/api/public/v1/projects/$projectId/report/gsc/sitemaps'
+import { Route as ApiPublicV1ProjectsProjectIdReportGscSearchAnalyticsRouteImport } from './routes/api/public/v1/projects/$projectId/report/gsc/search-analytics'
+import { Route as ApiPublicV1ProjectsProjectIdReportGscInspectUrlRouteImport } from './routes/api/public/v1/projects/$projectId/report/gsc/inspect-url'
+import { Route as ApiPublicV1ProjectsProjectIdReportGa4RunReportRouteImport } from './routes/api/public/v1/projects/$projectId/report/ga4/run-report'
+import { Route as ApiPublicV1ProjectsProjectIdReportBacklinksKindRouteImport } from './routes/api/public/v1/projects/$projectId/report/backlinks/$kind'
 
 const VerifyEmailRoute = VerifyEmailRouteImport.update({
   id: '/verify-email',
@@ -343,6 +350,48 @@ const ProjectPProjectIdAuditIssuesResultIdRoute =
     path: '/issues/$resultId',
     getParentRoute: () => ProjectPProjectIdAuditRoute,
   } as any)
+const ApiPublicV1ProjectsProjectIdReportRankingsRoute =
+  ApiPublicV1ProjectsProjectIdReportRankingsRouteImport.update({
+    id: '/api/public/v1/projects/$projectId/report/rankings',
+    path: '/api/public/v1/projects/$projectId/report/rankings',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicV1ProjectsProjectIdReportAuditRoute =
+  ApiPublicV1ProjectsProjectIdReportAuditRouteImport.update({
+    id: '/api/public/v1/projects/$projectId/report/audit',
+    path: '/api/public/v1/projects/$projectId/report/audit',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicV1ProjectsProjectIdReportGscSitemapsRoute =
+  ApiPublicV1ProjectsProjectIdReportGscSitemapsRouteImport.update({
+    id: '/api/public/v1/projects/$projectId/report/gsc/sitemaps',
+    path: '/api/public/v1/projects/$projectId/report/gsc/sitemaps',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicV1ProjectsProjectIdReportGscSearchAnalyticsRoute =
+  ApiPublicV1ProjectsProjectIdReportGscSearchAnalyticsRouteImport.update({
+    id: '/api/public/v1/projects/$projectId/report/gsc/search-analytics',
+    path: '/api/public/v1/projects/$projectId/report/gsc/search-analytics',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicV1ProjectsProjectIdReportGscInspectUrlRoute =
+  ApiPublicV1ProjectsProjectIdReportGscInspectUrlRouteImport.update({
+    id: '/api/public/v1/projects/$projectId/report/gsc/inspect-url',
+    path: '/api/public/v1/projects/$projectId/report/gsc/inspect-url',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicV1ProjectsProjectIdReportGa4RunReportRoute =
+  ApiPublicV1ProjectsProjectIdReportGa4RunReportRouteImport.update({
+    id: '/api/public/v1/projects/$projectId/report/ga4/run-report',
+    path: '/api/public/v1/projects/$projectId/report/ga4/run-report',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiPublicV1ProjectsProjectIdReportBacklinksKindRoute =
+  ApiPublicV1ProjectsProjectIdReportBacklinksKindRouteImport.update({
+    id: '/api/public/v1/projects/$projectId/report/backlinks/$kind',
+    path: '/api/public/v1/projects/$projectId/report/backlinks/$kind',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -394,6 +443,13 @@ export interface FileRoutesByFullPath {
   '/p/$projectId/settings/': typeof ProjectPProjectIdSettingsIndexRoute
   '/p/$projectId/audit/issues/$resultId': typeof ProjectPProjectIdAuditIssuesResultIdRoute
   '/api/public/v1/projects/$projectId/summary': typeof ApiPublicV1ProjectsProjectIdSummaryRoute
+  '/api/public/v1/projects/$projectId/report/audit': typeof ApiPublicV1ProjectsProjectIdReportAuditRoute
+  '/api/public/v1/projects/$projectId/report/rankings': typeof ApiPublicV1ProjectsProjectIdReportRankingsRoute
+  '/api/public/v1/projects/$projectId/report/backlinks/$kind': typeof ApiPublicV1ProjectsProjectIdReportBacklinksKindRoute
+  '/api/public/v1/projects/$projectId/report/ga4/run-report': typeof ApiPublicV1ProjectsProjectIdReportGa4RunReportRoute
+  '/api/public/v1/projects/$projectId/report/gsc/inspect-url': typeof ApiPublicV1ProjectsProjectIdReportGscInspectUrlRoute
+  '/api/public/v1/projects/$projectId/report/gsc/search-analytics': typeof ApiPublicV1ProjectsProjectIdReportGscSearchAnalyticsRoute
+  '/api/public/v1/projects/$projectId/report/gsc/sitemaps': typeof ApiPublicV1ProjectsProjectIdReportGscSitemapsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
@@ -440,6 +496,13 @@ export interface FileRoutesByTo {
   '/p/$projectId/settings': typeof ProjectPProjectIdSettingsIndexRoute
   '/p/$projectId/audit/issues/$resultId': typeof ProjectPProjectIdAuditIssuesResultIdRoute
   '/api/public/v1/projects/$projectId/summary': typeof ApiPublicV1ProjectsProjectIdSummaryRoute
+  '/api/public/v1/projects/$projectId/report/audit': typeof ApiPublicV1ProjectsProjectIdReportAuditRoute
+  '/api/public/v1/projects/$projectId/report/rankings': typeof ApiPublicV1ProjectsProjectIdReportRankingsRoute
+  '/api/public/v1/projects/$projectId/report/backlinks/$kind': typeof ApiPublicV1ProjectsProjectIdReportBacklinksKindRoute
+  '/api/public/v1/projects/$projectId/report/ga4/run-report': typeof ApiPublicV1ProjectsProjectIdReportGa4RunReportRoute
+  '/api/public/v1/projects/$projectId/report/gsc/inspect-url': typeof ApiPublicV1ProjectsProjectIdReportGscInspectUrlRoute
+  '/api/public/v1/projects/$projectId/report/gsc/search-analytics': typeof ApiPublicV1ProjectsProjectIdReportGscSearchAnalyticsRoute
+  '/api/public/v1/projects/$projectId/report/gsc/sitemaps': typeof ApiPublicV1ProjectsProjectIdReportGscSitemapsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -496,6 +559,13 @@ export interface FileRoutesById {
   '/_project/p/$projectId/settings/': typeof ProjectPProjectIdSettingsIndexRoute
   '/_project/p/$projectId/audit/issues/$resultId': typeof ProjectPProjectIdAuditIssuesResultIdRoute
   '/api/public/v1/projects/$projectId/summary': typeof ApiPublicV1ProjectsProjectIdSummaryRoute
+  '/api/public/v1/projects/$projectId/report/audit': typeof ApiPublicV1ProjectsProjectIdReportAuditRoute
+  '/api/public/v1/projects/$projectId/report/rankings': typeof ApiPublicV1ProjectsProjectIdReportRankingsRoute
+  '/api/public/v1/projects/$projectId/report/backlinks/$kind': typeof ApiPublicV1ProjectsProjectIdReportBacklinksKindRoute
+  '/api/public/v1/projects/$projectId/report/ga4/run-report': typeof ApiPublicV1ProjectsProjectIdReportGa4RunReportRoute
+  '/api/public/v1/projects/$projectId/report/gsc/inspect-url': typeof ApiPublicV1ProjectsProjectIdReportGscInspectUrlRoute
+  '/api/public/v1/projects/$projectId/report/gsc/search-analytics': typeof ApiPublicV1ProjectsProjectIdReportGscSearchAnalyticsRoute
+  '/api/public/v1/projects/$projectId/report/gsc/sitemaps': typeof ApiPublicV1ProjectsProjectIdReportGscSitemapsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -549,6 +619,13 @@ export interface FileRouteTypes {
     | '/p/$projectId/settings/'
     | '/p/$projectId/audit/issues/$resultId'
     | '/api/public/v1/projects/$projectId/summary'
+    | '/api/public/v1/projects/$projectId/report/audit'
+    | '/api/public/v1/projects/$projectId/report/rankings'
+    | '/api/public/v1/projects/$projectId/report/backlinks/$kind'
+    | '/api/public/v1/projects/$projectId/report/ga4/run-report'
+    | '/api/public/v1/projects/$projectId/report/gsc/inspect-url'
+    | '/api/public/v1/projects/$projectId/report/gsc/search-analytics'
+    | '/api/public/v1/projects/$projectId/report/gsc/sitemaps'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -595,6 +672,13 @@ export interface FileRouteTypes {
     | '/p/$projectId/settings'
     | '/p/$projectId/audit/issues/$resultId'
     | '/api/public/v1/projects/$projectId/summary'
+    | '/api/public/v1/projects/$projectId/report/audit'
+    | '/api/public/v1/projects/$projectId/report/rankings'
+    | '/api/public/v1/projects/$projectId/report/backlinks/$kind'
+    | '/api/public/v1/projects/$projectId/report/ga4/run-report'
+    | '/api/public/v1/projects/$projectId/report/gsc/inspect-url'
+    | '/api/public/v1/projects/$projectId/report/gsc/search-analytics'
+    | '/api/public/v1/projects/$projectId/report/gsc/sitemaps'
   id:
     | '__root__'
     | '/_app'
@@ -650,6 +734,13 @@ export interface FileRouteTypes {
     | '/_project/p/$projectId/settings/'
     | '/_project/p/$projectId/audit/issues/$resultId'
     | '/api/public/v1/projects/$projectId/summary'
+    | '/api/public/v1/projects/$projectId/report/audit'
+    | '/api/public/v1/projects/$projectId/report/rankings'
+    | '/api/public/v1/projects/$projectId/report/backlinks/$kind'
+    | '/api/public/v1/projects/$projectId/report/ga4/run-report'
+    | '/api/public/v1/projects/$projectId/report/gsc/inspect-url'
+    | '/api/public/v1/projects/$projectId/report/gsc/search-analytics'
+    | '/api/public/v1/projects/$projectId/report/gsc/sitemaps'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -669,6 +760,13 @@ export interface RootRouteChildren {
   ApiGa4OauthCallbackRoute: typeof ApiGa4OauthCallbackRoute
   ApiGscOauthCallbackRoute: typeof ApiGscOauthCallbackRoute
   ApiPublicV1ProjectsProjectIdSummaryRoute: typeof ApiPublicV1ProjectsProjectIdSummaryRoute
+  ApiPublicV1ProjectsProjectIdReportAuditRoute: typeof ApiPublicV1ProjectsProjectIdReportAuditRoute
+  ApiPublicV1ProjectsProjectIdReportRankingsRoute: typeof ApiPublicV1ProjectsProjectIdReportRankingsRoute
+  ApiPublicV1ProjectsProjectIdReportBacklinksKindRoute: typeof ApiPublicV1ProjectsProjectIdReportBacklinksKindRoute
+  ApiPublicV1ProjectsProjectIdReportGa4RunReportRoute: typeof ApiPublicV1ProjectsProjectIdReportGa4RunReportRoute
+  ApiPublicV1ProjectsProjectIdReportGscInspectUrlRoute: typeof ApiPublicV1ProjectsProjectIdReportGscInspectUrlRoute
+  ApiPublicV1ProjectsProjectIdReportGscSearchAnalyticsRoute: typeof ApiPublicV1ProjectsProjectIdReportGscSearchAnalyticsRoute
+  ApiPublicV1ProjectsProjectIdReportGscSitemapsRoute: typeof ApiPublicV1ProjectsProjectIdReportGscSitemapsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -1044,6 +1142,55 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectPProjectIdAuditIssuesResultIdRouteImport
       parentRoute: typeof ProjectPProjectIdAuditRoute
     }
+    '/api/public/v1/projects/$projectId/report/rankings': {
+      id: '/api/public/v1/projects/$projectId/report/rankings'
+      path: '/api/public/v1/projects/$projectId/report/rankings'
+      fullPath: '/api/public/v1/projects/$projectId/report/rankings'
+      preLoaderRoute: typeof ApiPublicV1ProjectsProjectIdReportRankingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/v1/projects/$projectId/report/audit': {
+      id: '/api/public/v1/projects/$projectId/report/audit'
+      path: '/api/public/v1/projects/$projectId/report/audit'
+      fullPath: '/api/public/v1/projects/$projectId/report/audit'
+      preLoaderRoute: typeof ApiPublicV1ProjectsProjectIdReportAuditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/v1/projects/$projectId/report/gsc/sitemaps': {
+      id: '/api/public/v1/projects/$projectId/report/gsc/sitemaps'
+      path: '/api/public/v1/projects/$projectId/report/gsc/sitemaps'
+      fullPath: '/api/public/v1/projects/$projectId/report/gsc/sitemaps'
+      preLoaderRoute: typeof ApiPublicV1ProjectsProjectIdReportGscSitemapsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/v1/projects/$projectId/report/gsc/search-analytics': {
+      id: '/api/public/v1/projects/$projectId/report/gsc/search-analytics'
+      path: '/api/public/v1/projects/$projectId/report/gsc/search-analytics'
+      fullPath: '/api/public/v1/projects/$projectId/report/gsc/search-analytics'
+      preLoaderRoute: typeof ApiPublicV1ProjectsProjectIdReportGscSearchAnalyticsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/v1/projects/$projectId/report/gsc/inspect-url': {
+      id: '/api/public/v1/projects/$projectId/report/gsc/inspect-url'
+      path: '/api/public/v1/projects/$projectId/report/gsc/inspect-url'
+      fullPath: '/api/public/v1/projects/$projectId/report/gsc/inspect-url'
+      preLoaderRoute: typeof ApiPublicV1ProjectsProjectIdReportGscInspectUrlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/v1/projects/$projectId/report/ga4/run-report': {
+      id: '/api/public/v1/projects/$projectId/report/ga4/run-report'
+      path: '/api/public/v1/projects/$projectId/report/ga4/run-report'
+      fullPath: '/api/public/v1/projects/$projectId/report/ga4/run-report'
+      preLoaderRoute: typeof ApiPublicV1ProjectsProjectIdReportGa4RunReportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/public/v1/projects/$projectId/report/backlinks/$kind': {
+      id: '/api/public/v1/projects/$projectId/report/backlinks/$kind'
+      path: '/api/public/v1/projects/$projectId/report/backlinks/$kind'
+      fullPath: '/api/public/v1/projects/$projectId/report/backlinks/$kind'
+      preLoaderRoute: typeof ApiPublicV1ProjectsProjectIdReportBacklinksKindRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -1243,6 +1390,20 @@ const rootRouteChildren: RootRouteChildren = {
   ApiGscOauthCallbackRoute: ApiGscOauthCallbackRoute,
   ApiPublicV1ProjectsProjectIdSummaryRoute:
     ApiPublicV1ProjectsProjectIdSummaryRoute,
+  ApiPublicV1ProjectsProjectIdReportAuditRoute:
+    ApiPublicV1ProjectsProjectIdReportAuditRoute,
+  ApiPublicV1ProjectsProjectIdReportRankingsRoute:
+    ApiPublicV1ProjectsProjectIdReportRankingsRoute,
+  ApiPublicV1ProjectsProjectIdReportBacklinksKindRoute:
+    ApiPublicV1ProjectsProjectIdReportBacklinksKindRoute,
+  ApiPublicV1ProjectsProjectIdReportGa4RunReportRoute:
+    ApiPublicV1ProjectsProjectIdReportGa4RunReportRoute,
+  ApiPublicV1ProjectsProjectIdReportGscInspectUrlRoute:
+    ApiPublicV1ProjectsProjectIdReportGscInspectUrlRoute,
+  ApiPublicV1ProjectsProjectIdReportGscSearchAnalyticsRoute:
+    ApiPublicV1ProjectsProjectIdReportGscSearchAnalyticsRoute,
+  ApiPublicV1ProjectsProjectIdReportGscSitemapsRoute:
+    ApiPublicV1ProjectsProjectIdReportGscSitemapsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
