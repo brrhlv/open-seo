@@ -28,7 +28,20 @@ async function insert(
   return row;
 }
 
+async function updateById(
+  id: number,
+  values: Partial<
+    Omit<typeof backlinkSnapshots.$inferInsert, "id" | "projectId">
+  >,
+): Promise<void> {
+  await db
+    .update(backlinkSnapshots)
+    .set(values)
+    .where(eq(backlinkSnapshots.id, id));
+}
+
 export const BacklinkSnapshotRepository = {
   getLatestForProject,
   insert,
+  updateById,
 };
