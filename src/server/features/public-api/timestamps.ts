@@ -14,7 +14,8 @@ export function toIsoTimestamp(
 /** Inclusive end-of-day cutoff for an as-of date (YYYY-MM-DD), compared as
  *  text against stored timestamps. ISO values ("…T…Z") on that day sort at or
  *  before it, and so do SQLite "YYYY-MM-DD HH:MM:SS" values (" " < "T"); any
- *  value on the next day sorts after it. */
+ *  value on the next day sorts after it. The caller must validate that `date`
+ *  is a real YYYY-MM-DD string (e.g. via `isIsoDate`) before passing it here. */
 export function endOfDayCutoff(date: string): string {
   return `${date}T23:59:59.999Z`;
 }

@@ -87,7 +87,20 @@ describe("toDataforseoReportApiError", () => {
       502,
       { error: "upstream_error", status: 0 },
     ],
+    [
+      "non-numeric providerStatus",
+      new AppError("UPSTREAM_UNAVAILABLE", "x", { providerStatus: "abc" }),
+      502,
+      { error: "upstream_error", status: 0 },
+    ],
   ])("maps a DataForSEO %s", (_label, error, status, body) => {
     expect(wire(toDataforseoReportApiError(error))).toEqual([status, body]);
+  });
+
+  it("falls through to toReportApiError for a non-AppError", () => {
+    expect(wire(toDataforseoReportApiError(new Error("boom")))).toEqual([
+      500,
+      { error: "internal_error" },
+    ]);
   });
 });

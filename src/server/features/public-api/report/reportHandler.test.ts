@@ -118,4 +118,31 @@ describe("handleReportRequest", () => {
     expect(response.status).toBe(status);
     expect(await response.json()).toEqual(body);
   });
+
+  it("logs 5xx errors but not 4xx errors", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await call(() => Promise.reject(new Error("db down")));
+    expect(spy).toHaveBeenCalledOnce();
+
+    spy.mockClear();
+    await call(() => Promise.reject(new ReportApiError(409, "no_audit")));
+    expect(spy).not.toHaveBeenCalled();
+
+    spy.mockRestore();
+  });
+
+  it("never logs the Authorization or X-OpenSEO-Key value", async () => {
+    const logged: unknown[] = [];
+    vi.spyOn(console, "error").mockImplementation((...args) => {
+      logged.push(...args);
+    });
+
+    await call(() => Promise.reject(new Error("db down")));
+
+    const serialized = JSON.stringify(logged);
+    expect(serialized).not.toContain(KEY);
+
+    vi.restoreAllMocks();
+  });
 });
