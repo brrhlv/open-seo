@@ -42,9 +42,11 @@ function thrown(fn: () => unknown): unknown {
   throw new Error("expected a throw");
 }
 
-describe("date params", () => {
-  const at = (query: string) => new Request(`https://seo.test/r${query}`);
+function at(query: string) {
+  return new Request(`https://seo.test/r${query}`);
+}
 
+describe("date params", () => {
   it("reads a valid date, null when absent, and rejects impossible dates", () => {
     expect(readDateParam(at("?asOf=2026-09-30"), "asOf")).toBe("2026-09-30");
     expect(readDateParam(at(""), "asOf")).toBeNull();
