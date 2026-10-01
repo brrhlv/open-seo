@@ -420,59 +420,76 @@ export function createGa4DataClient(opts: {
   const propertyId = propertyIdSchema.parse(opts.propertyId);
   const accessToken = memoizedGa4AccessToken(opts);
 
+  async function postRunReport(body: unknown): Promise<Response> {
+    const token = await accessToken();
+    let response: Response;
+    try {
+      response = await fetch(`${GA4_DATA_API_BASE}/${propertyId}:runReport`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (error) {
+      if (isAbortError(error)) throw error;
+      throw new Ga4DataApiError(
+        0,
+        "Google Analytics reporting is temporarily unavailable.",
+      );
+    }
+    if (!response.ok) {
+      const errorBody = await response
+        .text()
+        .then((responseBody) => responseBody.slice(0, MAX_ERROR_BODY_LENGTH))
+        .catch(() => "");
+      let upstreamReason: string | null = null;
+      try {
+        const parsed = googleErrorSchema.safeParse(JSON.parse(errorBody));
+        if (parsed.success) {
+          upstreamReason =
+            parsed.data.error.details?.find(
+              (detail) =>
+                detail.metadata?.service === "analyticsdata.googleapis.com",
+            )?.reason ??
+            parsed.data.error.details?.find((detail) => detail.reason)
+              ?.reason ??
+            null;
+        }
+      } catch {
+        // Non-JSON error pages intentionally collapse to status-only errors.
+      }
+      throw new Ga4DataApiError(
+        response.status,
+        dataMessageForStatus(response.status),
+        safeRetryAfter(response),
+        upstreamReason,
+      );
+    }
+    return response;
+  }
+
   return {
     async runReport(
       request: Ga4RunReportRequest,
     ): Promise<Ga4RunReportResponse> {
-      const token = await accessToken();
-      let response: Response;
-      try {
-        response = await fetch(`${GA4_DATA_API_BASE}/${propertyId}:runReport`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(request),
-        });
-      } catch (error) {
-        if (isAbortError(error)) throw error;
-        throw new Ga4DataApiError(
-          0,
-          "Google Analytics reporting is temporarily unavailable.",
-        );
-      }
-      if (!response.ok) {
-        const body = await response
-          .text()
-          .then((responseBody) => responseBody.slice(0, MAX_ERROR_BODY_LENGTH))
-          .catch(() => "");
-        let upstreamReason: string | null = null;
-        try {
-          const parsed = googleErrorSchema.safeParse(JSON.parse(body));
-          if (parsed.success) {
-            upstreamReason =
-              parsed.data.error.details?.find(
-                (detail) =>
-                  detail.metadata?.service === "analyticsdata.googleapis.com",
-              )?.reason ??
-              parsed.data.error.details?.find((detail) => detail.reason)
-                ?.reason ??
-              null;
-          }
-        } catch {
-          // Non-JSON error pages intentionally collapse to status-only errors.
-        }
-        throw new Ga4DataApiError(
-          response.status,
-          dataMessageForStatus(response.status),
-          safeRetryAfter(response),
-          upstreamReason,
-        );
-      }
-
+      const response = await postRunReport(request);
       try {
         return runReportResponseSchema.parse(await response.json());
+      } catch {
+        throw new Ga4MalformedResponseError();
+      }
+    },
+
+    /** Report API (BRRHLV-375): the same call with the upstream JSON returned
+     *  as-is. The schema above strips fields brrhlv reads (totals, maximums,
+     *  minimums, …). */
+    async runReportRaw(request: Record<string, unknown>): Promise<unknown> {
+      const response = await postRunReport(request);
+      try {
+        const data: unknown = await response.json();
+        return data;
       } catch {
         throw new Ga4MalformedResponseError();
       }

@@ -151,6 +151,13 @@ export function createGscClient(opts: {
       return data.siteEntry ?? [];
     },
 
+    /** Webmasters API `sitemaps.list`, raw JSON (report API, BRRHLV-375). */
+    async listSitemaps(siteUrl: string): Promise<unknown> {
+      return request<unknown>(
+        `${GSC_API_BASE}/sites/${encodeURIComponent(siteUrl)}/sitemaps`,
+      );
+    },
+
     /** Webmasters API `searchAnalytics.query`. siteUrl is used verbatim. */
     async querySearchAnalytics(
       siteUrl: string,

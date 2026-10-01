@@ -167,4 +167,20 @@ describe("gscClient", () => {
       createGscClient({ userId: "u1" }).listSites(),
     ).rejects.toBeInstanceOf(GscTokenError);
   });
+
+  it("lists sitemaps for the encoded property and returns the raw JSON", async () => {
+    const raw = {
+      sitemap: [
+        { path: "https://x.com/sitemap.xml", errors: "0", warnings: "0" },
+      ],
+    };
+    mocks.fetch.mockResolvedValue(jsonResponse(raw));
+    const { createGscClient } = await import("./gscClient");
+    await expect(
+      createGscClient({ userId: "u1" }).listSitemaps("sc-domain:x.com"),
+    ).resolves.toEqual(raw);
+    expect(mocks.fetch.mock.calls[0][0]).toBe(
+      "https://www.googleapis.com/webmasters/v3/sites/sc-domain%3Ax.com/sitemaps",
+    );
+  });
 });

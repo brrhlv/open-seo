@@ -405,4 +405,42 @@ describe("ga4Client data API", () => {
       }).runReport(reportRequest),
     ).rejects.toMatchObject({ status: 0 });
   });
+
+  it("returns the raw runReport JSON, keeping fields the parsed path strips", async () => {
+    const raw = {
+      rows: [],
+      rowCount: 0,
+      totals: [{ metricValues: [{ value: "42" }] }],
+      maximums: [{ metricValues: [{ value: "9" }] }],
+    };
+    mocks.fetch.mockResolvedValue(Response.json(raw));
+    const body = {
+      dateRanges: [{ startDate: "2026-09-01", endDate: "2026-09-30" }],
+      metrics: [{ name: "sessions" }],
+      metricAggregations: ["TOTAL", "MAXIMUM"],
+    };
+    const result = await createGa4DataClient({
+      userId: "user_1",
+      ga4AccountId: "account_1",
+      propertyId: "properties/123",
+    }).runReportRaw(body);
+    expect(result).toEqual(raw);
+    expect(mocks.fetch).toHaveBeenCalledWith(
+      "https://analyticsdata.googleapis.com/v1beta/properties/123:runReport",
+      expect.objectContaining({ method: "POST", body: JSON.stringify(body) }),
+    );
+  });
+
+  it("classifies raw-report failures like runReport", async () => {
+    mocks.fetch.mockResolvedValue(
+      Response.json({ error: {} }, { status: 429 }),
+    );
+    await expect(
+      createGa4DataClient({
+        userId: "user_1",
+        ga4AccountId: "account_1",
+        propertyId: "properties/123",
+      }).runReportRaw({}),
+    ).rejects.toBeInstanceOf(Ga4DataApiError);
+  });
 });
