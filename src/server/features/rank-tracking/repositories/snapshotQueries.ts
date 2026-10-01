@@ -211,6 +211,34 @@ export async function getSnapshotsBeforeDate(
   return getSnapshotsForConfig(configId, { beforeDate, order: "latest" });
 }
 
+/**
+ * Report API (BRRHLV-375): the latest completed FULL run (subset runs check
+ * only some keywords) for a config whose completed_at is at or before
+ * `cutoff`. The app writes completed_at as ISO; the ISO end-of-day cutoff also
+ * orders correctly against SQLite "YYYY-MM-DD HH:MM:SS" text.
+ */
+export async function getLatestCompletedFullRunAtOrBefore(
+  configId: string,
+  cutoff: string,
+) {
+  const rows = await db
+    .select({ id: rankCheckRuns.id, completedAt: rankCheckRuns.completedAt })
+    .from(rankCheckRuns)
+    .where(
+      and(
+        eq(rankCheckRuns.configId, configId),
+        eq(rankCheckRuns.status, "completed"),
+        eq(rankCheckRuns.isSubsetRun, false),
+        lte(rankCheckRuns.completedAt, cutoff),
+      ),
+    )
+    // Text order: on the same day, SQLite-format and ISO values don't
+    // interleave by time (" " < "T"); harmless, production writes ISO only.
+    .orderBy(desc(rankCheckRuns.completedAt))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function getEarliestSnapshotsForKeywords(
   configId: string,
   keywordIds: string[],
