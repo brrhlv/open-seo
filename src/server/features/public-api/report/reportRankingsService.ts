@@ -16,6 +16,11 @@ type RankConfig = Awaited<
   ReturnType<typeof RankTrackingRepository.getConfigsForProject>
 >[number];
 
+/** Composite key for a keyword×device snapshot row. */
+function snapshotKey(id: string, device: string) {
+  return `${id}\u0000${device}`;
+}
+
 /** ISO strings order lexicographically; null when none. */
 function latestIso(values: Array<string | null>): string | null {
   return values.reduce<string | null>(
@@ -59,9 +64,11 @@ async function loadConfig(
   const volumeById = new Map(
     tracked.map((keyword) => [keyword.id, keyword.searchVolume]),
   );
-  const key = (id: string, device: string) => `${id}\u0000${device}`;
   const previousByKey = new Map(
-    previous.map((row) => [key(row.trackingKeywordId, row.device), row]),
+    previous.map((row) => [
+      snapshotKey(row.trackingKeywordId, row.device),
+      row,
+    ]),
   );
 
   // Rows = what the as-of run checked. position null = checked, not found
@@ -69,7 +76,9 @@ async function loadConfig(
   // run, not found" (previousPosition null, true) from "not checked then"
   // (false) — consumer request, 2026-10-01.
   const keywords = current.map((row) => {
-    const prior = previousByKey.get(key(row.trackingKeywordId, row.device));
+    const prior = previousByKey.get(
+      snapshotKey(row.trackingKeywordId, row.device),
+    );
     return {
       configId: config.id,
       keyword: row.keyword,
