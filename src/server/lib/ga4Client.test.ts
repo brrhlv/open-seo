@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- covers Admin + Data APIs and the new runReportRaw path in one file (gscClient.test.ts precedent) */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createGa4AdminClient, createGa4DataClient } from "./ga4Client";
 import {
