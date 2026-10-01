@@ -125,7 +125,7 @@ describe("ReportAuditService.getAudit", () => {
   it("picks the homepage deterministically when two homepage rows arrive in reverse url order", async () => {
     // Both https://www.socialboothlv.com/ and https://socialboothlv.com/ are
     // homepages. Sorted by [crawlDepth asc (nulls last), url asc], the
-    // www-less form comes last alphabetically; the shorter url wins.
+    // www-less form sorts first ("s" < "w"), so it wins.
     mocks.getMobileLighthouseForAudit.mockResolvedValue([
       lighthouse("https://www.socialboothlv.com/", 0, 60),
       lighthouse("https://socialboothlv.com/", 0, 78),
