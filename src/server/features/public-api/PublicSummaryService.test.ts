@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   getConfigsForProject: vi.fn(),
   getLatestResults: vi.fn(),
   getBacklinkSummary: vi.fn(),
+  listRecentForProject: vi.fn(),
   getLatestAuditForProject: vi.fn(),
   getIssueTypePageCountsForAudit: vi.fn(),
   getPerformance: vi.fn(),
@@ -39,6 +40,14 @@ vi.mock("@/server/features/rank-tracking/services/rankTrackingResults", () => ({
 vi.mock("@/server/features/dashboard/services/DashboardService", () => ({
   DashboardService: { getBacklinkSummary: mocks.getBacklinkSummary },
 }));
+vi.mock(
+  "@/server/features/dashboard/repositories/BacklinkSnapshotRepository",
+  () => ({
+    BacklinkSnapshotRepository: {
+      listRecentForProject: mocks.listRecentForProject,
+    },
+  }),
+);
 vi.mock("@/server/features/audit/repositories/AuditRepository", () => ({
   AuditRepository: {
     getLatestAuditForProject: mocks.getLatestAuditForProject,
@@ -70,6 +79,7 @@ describe("PublicSummaryService.getSummary", () => {
     });
     mocks.getConfigsForProject.mockResolvedValue([]);
     mocks.getBacklinkSummary.mockResolvedValue(null);
+    mocks.listRecentForProject.mockResolvedValue([]);
     mocks.getLatestAuditForProject.mockResolvedValue(undefined);
     mocks.getPerformance.mockRejectedValue(new GscNotConnectedError("proj-a"));
     mocks.getOrganicOverview.mockRejectedValue(
@@ -104,6 +114,7 @@ describe("PublicSummaryService.getSummary", () => {
         referringDomains: 0,
         rank: 0,
         capturedAt: null,
+        history: [],
       },
       audit: {
         status: "none",
@@ -131,6 +142,64 @@ describe("PublicSummaryService.getSummary", () => {
       ga4: { error: "ga4_quota_exhausted" },
       audit: { status: "none" },
     });
+  });
+
+  it("returns backlink history oldest first, current domain only", async () => {
+    mocks.listRecentForProject.mockResolvedValue([
+      {
+        domain: "socialboothlv.com",
+        backlinks: 340,
+        referringDomains: 55,
+        rank: 12,
+        capturedAt: "2026-09-27 08:00:00",
+      },
+      {
+        domain: "socialboothlv.com",
+        backlinks: null,
+        referringDomains: 50,
+        rank: null,
+        capturedAt: "2026-08-27 08:00:00",
+      },
+      {
+        domain: "old-domain.com",
+        backlinks: 9,
+        referringDomains: 9,
+        rank: 9,
+        capturedAt: "2026-07-27 08:00:00",
+      },
+    ]);
+
+    const summary = await PublicSummaryService.getSummary(input);
+
+    expect(mocks.listRecentForProject).toHaveBeenCalledWith("proj-a", 30);
+    expect(summary?.backlinks).toMatchObject({
+      history: [
+        {
+          capturedAt: "2026-08-27T08:00:00.000Z",
+          backlinks: 0,
+          referringDomains: 50,
+          rank: 0,
+        },
+        {
+          capturedAt: "2026-09-27T08:00:00.000Z",
+          backlinks: 340,
+          referringDomains: 55,
+          rank: 12,
+        },
+      ],
+    });
+  });
+
+  it("skips the backlink history read when the project has no domain", async () => {
+    mocks.getProjectWithOrganization.mockResolvedValue({
+      organizationId: "org-1",
+      project: { id: "proj-a", domain: null },
+    });
+
+    const summary = await PublicSummaryService.getSummary(input);
+
+    expect(mocks.listRecentForProject).not.toHaveBeenCalled();
+    expect(summary?.backlinks).toMatchObject({ history: [] });
   });
 
   it("shapes rankings, backlinks, audit, GSC and GA4 data", async () => {

@@ -1,6 +1,7 @@
-import { sort } from "remeda";
+import { reverse, sort } from "remeda";
 import { AuditRepository } from "@/server/features/audit/repositories/AuditRepository";
 import { getIssueTypePageCountsForAudit } from "@/server/features/audit/repositories/auditSummaryQueries";
+import { BacklinkSnapshotRepository } from "@/server/features/dashboard/repositories/BacklinkSnapshotRepository";
 import { DashboardService } from "@/server/features/dashboard/services/DashboardService";
 import { Ga4OrganicOverviewService } from "@/server/features/ga4/services/Ga4OrganicOverviewService";
 import { Ga4ReportingService } from "@/server/features/ga4/services/Ga4ReportingService";
@@ -36,6 +37,9 @@ const MAX_CONFIGS = 5;
 const KEYWORD_LIMIT = 100;
 const TOP_QUERY_LIMIT = 10;
 const SOURCE_LIMIT = 10;
+// Stored snapshots are at most one per UTC day per writer; 30 covers a
+// month of daily refreshes or 2+ years of monthly ones.
+const BACKLINK_HISTORY_LIMIT = 30;
 // dimensions:["date"] returns one row per day; the longest range is 90 days.
 const DAILY_ROW_LIMIT = 200;
 
@@ -175,12 +179,31 @@ async function getRankings(projectId: string, range: PublicSummaryRange) {
 
 async function getBacklinks(projectId: string, domain: string | null) {
   // Stored snapshot only — refreshing it (ensureBacklinkSnapshot) is metered.
-  const summary = await DashboardService.getBacklinkSummary(projectId, domain);
+  const [summary, snapshots] = await Promise.all([
+    DashboardService.getBacklinkSummary(projectId, domain),
+    domain
+      ? BacklinkSnapshotRepository.listRecentForProject(
+          projectId,
+          BACKLINK_HISTORY_LIMIT,
+        )
+      : Promise.resolve([]),
+  ]);
   return {
     backlinks: summary?.backlinks ?? 0,
     referringDomains: summary?.referringDomains ?? 0,
     rank: summary?.rank ?? 0,
     capturedAt: toIsoTimestamp(summary?.capturedAt),
+    // LODERX-090: trend for external dashboards. Oldest first; rows for a
+    // previous project domain are dropped so a domain change can't splice
+    // two profiles into one line.
+    history: reverse(snapshots.filter((row) => row.domain === domain)).map(
+      (row) => ({
+        capturedAt: toIsoTimestamp(row.capturedAt),
+        backlinks: row.backlinks ?? 0,
+        referringDomains: row.referringDomains ?? 0,
+        rank: row.rank ?? 0,
+      }),
+    ),
   };
 }
 
