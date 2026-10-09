@@ -123,13 +123,24 @@ export function shapeResult(args: ShapeArgs): BrandLookupResult {
     ? successfulBundles
     : successfulBundles.filter((b) => b.platform !== "chat_gpt");
   const monthlyVolume = aggregateMonthlyVolume(trendBundles);
+  const sovOutcomes = chatGptLocaleMatches
+    ? args.crossOutcomes
+    : args.crossOutcomes.filter((outcome) => outcome.platform !== "chat_gpt");
   const shareOfVoice = computeShareOfVoice(
-    chatGptLocaleMatches
-      ? args.crossOutcomes
-      : args.crossOutcomes.filter((outcome) => outcome.platform !== "chat_gpt"),
+    sovOutcomes,
     args.detected.value,
     args.competitorKeys,
   );
+  const shareOfVoiceByPlatform = sovOutcomes.flatMap((outcome) => {
+    const platformShare = computeShareOfVoice(
+      [outcome],
+      args.detected.value,
+      args.competitorKeys,
+    );
+    return platformShare
+      ? [{ platform: outcome.platform, shareOfVoice: platformShare }]
+      : [];
+  });
 
   const hasData =
     (totalMentions ?? 0) > 0 ||
@@ -150,6 +161,7 @@ export function shapeResult(args: ShapeArgs): BrandLookupResult {
     totalAiSearchVolume,
     perPlatform,
     shareOfVoice,
+    shareOfVoiceByPlatform,
     topPages,
     topQueries,
     monthlyVolume,

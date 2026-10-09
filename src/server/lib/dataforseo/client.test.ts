@@ -158,6 +158,25 @@ describe("meterDataforseoCall with split balances", () => {
     expect(trackMock).not.toHaveBeenCalled();
   });
 
+  it("reports each call's cost to onCost, including charged task failures", async () => {
+    isHostedServerAuthModeMock.mockResolvedValue(false);
+    const onCost = vi.fn();
+    const client = createDataforseoClient(billingCustomer, { onCost });
+    mockDataforseoResult(0.05);
+    await client.backlinks.summary(backlinksInput);
+    vi.mocked(fetchBacklinksSummary).mockRejectedValue(
+      new DataforseoChargedTaskError("task failed", {
+        costUsd: 0.02,
+        path: ["backlinks", "summary"],
+      }),
+    );
+
+    await expect(client.backlinks.summary(backlinksInput)).rejects.toThrow(
+      "task failed",
+    );
+    expect(onCost.mock.calls).toEqual([[0.05], [0.02]]);
+  });
+
   it("checks both monthly and topup balances in parallel", async () => {
     setupHostedMode();
     mockBalances(5000, 3000);

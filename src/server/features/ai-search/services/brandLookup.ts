@@ -2,6 +2,7 @@ import { waitUntil } from "cloudflare:workers";
 import { identity, sortBy } from "remeda";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
 import { createDataforseoClient } from "@/server/lib/dataforseo";
+import type { DataforseoClientOptions } from "@/server/lib/dataforseo/client";
 import {
   buildLlmTarget,
   CHATGPT_LANGUAGE_CODE,
@@ -52,6 +53,7 @@ const TOP_SOURCES_PER_PLATFORM = 10;
 export async function getBrandLookup(
   input: BrandLookupInput,
   billingCustomer: BillingCustomerContext,
+  options: Pick<DataforseoClientOptions, "onCost"> = {},
 ): Promise<BrandLookupResult> {
   const detected = detectTarget(input.query);
   const researchTarget = resolveResearchTarget(input, detected);
@@ -102,7 +104,7 @@ export async function getBrandLookup(
     };
   }
 
-  const dataforseo = createDataforseoClient(billingCustomer);
+  const dataforseo = createDataforseoClient(billingCustomer, options);
 
   // Settle each platform independently so a failure in one doesn't discard the
   // other. Keep the metered DataForSEO calls sequenced: in hosted mode each

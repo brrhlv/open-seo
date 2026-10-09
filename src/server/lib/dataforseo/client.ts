@@ -62,7 +62,7 @@ export { mapDataforseoPathToCreditFeature };
 
 /**
  * Wraps a section fetcher with billing metering. Each entry on the client is
- * `meter(customer, fetchX, defaultFeature?)`, which returns a function with
+ * `meter(ctx, fetchX, defaultFeature?)`, which returns a function with
  * the fetcher's own input type and resolves to its unwrapped `.data`.
  *
  * `defaultFeature` is the fallback credit feature; a caller can override it per
@@ -71,78 +71,110 @@ export { mapDataforseoPathToCreditFeature };
  * read named fields rather than spreading the input.
  */
 function meter<I, T>(
-  customer: BillingCustomerContext,
+  ctx: MeterContext,
   fetcher: (input: I) => Promise<DataforseoApiResponse<T>>,
   defaultFeature?: CreditFeature,
 ): (input: I & { creditFeature?: CreditFeature }) => Promise<T> {
   return (input) =>
     meterDataforseoCall(
-      customer,
-      () => fetcher(input),
+      ctx.customer,
+      () => observeCost(fetcher(input), ctx.onCost),
       input.creditFeature ?? defaultFeature,
     );
 }
 
-export function createDataforseoClient(customer: BillingCustomerContext) {
+type MeterContext = {
+  customer: BillingCustomerContext;
+  onCost?: (costUsd: number) => void;
+};
+
+export type DataforseoClientOptions = {
+  /**
+   * Called with the provider USD cost of every billed call made through this
+   * client, including failed-but-charged tasks. Lets a caller persist what a
+   * unit of work actually cost (e.g. AI-visibility snapshots); metering itself
+   * is unchanged.
+   */
+  onCost?: (costUsd: number) => void;
+};
+
+async function observeCost<T>(
+  pending: Promise<DataforseoApiResponse<T>>,
+  onCost: ((costUsd: number) => void) | undefined,
+): Promise<DataforseoApiResponse<T>> {
+  if (!onCost) return pending;
+  try {
+    const result = await pending;
+    onCost(result.billing.costUsd);
+    return result;
+  } catch (error) {
+    if (error instanceof DataforseoChargedTaskError) {
+      onCost(error.billing.costUsd);
+    }
+    throw error;
+  }
+}
+
+export function createDataforseoClient(
+  customer: BillingCustomerContext,
+  options: DataforseoClientOptions = {},
+) {
+  const ctx: MeterContext = { customer, onCost: options.onCost };
   return {
     business: {
-      businessListings: meter(
-        customer,
-        fetchBusinessListingsSearch,
-        "local_seo",
-      ),
-      questionsAnswers: meter(customer, fetchQuestionsAnswers, "local_seo"),
-      myBusinessInfo: meter(customer, fetchMyBusinessInfo, "local_seo"),
+      businessListings: meter(ctx, fetchBusinessListingsSearch, "local_seo"),
+      questionsAnswers: meter(ctx, fetchQuestionsAnswers, "local_seo"),
+      myBusinessInfo: meter(ctx, fetchMyBusinessInfo, "local_seo"),
       // task_post is where DataForSEO charges; collection runs unmetered
       // through fetchBusinessDataTaskResult (see index.ts).
-      reviewsTaskPost: meter(customer, postGoogleReviewsTask, "local_seo"),
-      updatesTaskPost: meter(customer, postMyBusinessUpdatesTask, "local_seo"),
+      reviewsTaskPost: meter(ctx, postGoogleReviewsTask, "local_seo"),
+      updatesTaskPost: meter(ctx, postMyBusinessUpdatesTask, "local_seo"),
     },
     backlinks: {
-      summary: meter(customer, fetchBacklinksSummary),
-      rows: meter(customer, fetchBacklinksRows),
-      referringDomains: meter(customer, fetchReferringDomains),
-      domainPages: meter(customer, fetchDomainPagesSummary),
-      history: meter(customer, fetchBacklinksHistory),
+      summary: meter(ctx, fetchBacklinksSummary),
+      rows: meter(ctx, fetchBacklinksRows),
+      referringDomains: meter(ctx, fetchReferringDomains),
+      domainPages: meter(ctx, fetchDomainPagesSummary),
+      history: meter(ctx, fetchBacklinksHistory),
     },
     keywords: {
-      related: meter(customer, fetchRelatedKeywords),
-      suggestions: meter(customer, fetchKeywordSuggestions),
-      ideas: meter(customer, fetchKeywordIdeas),
+      related: meter(ctx, fetchRelatedKeywords),
+      suggestions: meter(ctx, fetchKeywordSuggestions),
+      ideas: meter(ctx, fetchKeywordIdeas),
       // Google Ads endpoints for countries Labs doesn't support.
-      adsIdeas: meter(customer, fetchAdsKeywordIdeas),
-      adsSearchVolume: meter(customer, fetchAdsSearchVolume),
+      adsIdeas: meter(ctx, fetchAdsKeywordIdeas),
+      adsSearchVolume: meter(ctx, fetchAdsSearchVolume),
     },
     domain: {
-      rankOverview: meter(customer, fetchDomainRankOverview),
-      rankedKeywords: meter(customer, fetchRankedKeywords),
-      relevantPages: meter(customer, fetchRelevantPages),
+      rankOverview: meter(ctx, fetchDomainRankOverview),
+      rankedKeywords: meter(ctx, fetchRankedKeywords),
+      relevantPages: meter(ctx, fetchRelevantPages),
     },
     serp: {
-      live: meter(customer, fetchLiveSerp),
-      rankCheck: meter(customer, fetchRankCheckSerp, "rank_tracking"),
+      live: meter(ctx, fetchLiveSerp),
+      rankCheck: meter(ctx, fetchRankCheckSerp, "rank_tracking"),
       // Posts up to 100 queued rank check tasks; one metered charge covers the
       // whole batch (DataForSEO bills task_post at post time, collection is
       // free).
-      rankCheckTaskPost: meter(customer, postRankCheckTasks, "rank_tracking"),
-      local: meter(customer, fetchLocalSerp, "local_seo"),
+      rankCheckTaskPost: meter(ctx, postRankCheckTasks, "rank_tracking"),
+      local: meter(ctx, fetchLocalSerp, "local_seo"),
     },
     labs: {
       // Callers (e.g. the keyword-metrics MCP tool) can attribute the spend to
       // their own feature by passing `creditFeature` in the input; defaults to
       // rank_tracking when omitted.
-      keywordOverview: meter(customer, fetchKeywordOverview, "rank_tracking"),
-      serpCompetitors: meter(customer, fetchSerpCompetitors),
+      keywordOverview: meter(ctx, fetchKeywordOverview, "rank_tracking"),
+      serpCompetitors: meter(ctx, fetchSerpCompetitors),
     },
     lighthouse: {
-      live: meter(customer, fetchLighthouseResult),
+      live: meter(ctx, fetchLighthouseResult),
     },
     aiSearch: {
-      mentionsSearch: meter(customer, fetchLlmMentionsSearch),
-      aggregatedMetrics: meter(customer, fetchLlmAggregatedMetrics),
-      topPages: meter(customer, fetchLlmTopPages),
-      crossAggregatedMetrics: meter(customer, fetchLlmCrossAggregatedMetrics),
-      llmResponse: meter(customer, fetchLlmResponse),
+      mentionsSearch: meter(ctx, fetchLlmMentionsSearch),
+      aggregatedMetrics: meter(ctx, fetchLlmAggregatedMetrics),
+      topPages: meter(ctx, fetchLlmTopPages),
+      crossAggregatedMetrics: meter(ctx, fetchLlmCrossAggregatedMetrics),
+      llmResponse: meter(ctx, fetchLlmResponse),
     },
   } as const;
 }

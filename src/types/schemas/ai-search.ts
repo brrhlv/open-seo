@@ -141,6 +141,16 @@ export const brandLookupResultSchema = z.object({
   // are unreachable anyway (the cache key's param set changed), see the
   // buildCacheKey comment in brandLookup.ts.
   shareOfVoice: brandShareOfVoiceSchema.nullable(),
+  // The same leaderboard split per platform, for AI-visibility snapshots
+  // (PAI-217). Defaulted so cache entries written before it existed parse.
+  shareOfVoiceByPlatform: z
+    .array(
+      z.object({
+        platform: z.enum(["chat_gpt", "google"]),
+        shareOfVoice: brandShareOfVoiceSchema,
+      }),
+    )
+    .default([]),
   topPages: z.array(brandTopPageSchema).max(40),
   topQueries: z.array(brandTopQuerySchema).max(50),
   monthlyVolume: z.array(brandMonthlyVolumeSchema),
