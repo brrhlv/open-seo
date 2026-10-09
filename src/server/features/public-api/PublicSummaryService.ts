@@ -1,4 +1,5 @@
 import { reverse, sort } from "remeda";
+import { AiVisibilityService } from "@/server/features/ai-visibility/services/AiVisibilityService";
 import { AuditRepository } from "@/server/features/audit/repositories/AuditRepository";
 import { getIssueTypePageCountsForAudit } from "@/server/features/audit/repositories/auditSummaryQueries";
 import { BacklinkSnapshotRepository } from "@/server/features/dashboard/repositories/BacklinkSnapshotRepository";
@@ -30,7 +31,8 @@ import { toIsoTimestamp } from "./timestamps";
 
 // Read-only project summary for external dashboards (PAI-222). Every read is
 // D1 or first-party Google data — never a DataForSEO-metered path (no
-// ensureBacklinkSnapshot, AI visibility, or live SERP/opportunity calls).
+// ensureBacklinkSnapshot, live AI visibility, or live SERP/opportunity calls).
+// AI visibility here is the stored monthly snapshots only (PAI-217).
 
 // Same bound as the dashboard overview; projects rarely have more configs.
 const MAX_CONFIGS = 5;
@@ -40,6 +42,8 @@ const SOURCE_LIMIT = 10;
 // Stored snapshots are at most one per UTC day per writer; 30 covers a
 // month of daily refreshes or 2+ years of monthly ones.
 const BACKLINK_HISTORY_LIMIT = 30;
+// Months of stored AI-visibility snapshots returned as history.
+const AI_VISIBILITY_HISTORY_MONTHS = 12;
 // dimensions:["date"] returns one row per day; the longest range is 90 days.
 const DAILY_ROW_LIMIT = 200;
 
@@ -207,6 +211,42 @@ async function getBacklinks(projectId: string, domain: string | null) {
   };
 }
 
+/**
+ * PAI-217: stored AI-visibility snapshots (no DataForSEO call). `tracked` is
+ * false when the project has no tracker; `platforms` is empty until the first
+ * run lands. Additive — consumers that predate it ignore the key.
+ */
+async function getAiVisibility(projectId: string) {
+  const { config, latest, history } = await AiVisibilityService.getHistory(
+    projectId,
+    AI_VISIBILITY_HISTORY_MONTHS,
+  );
+  return {
+    tracked: config?.isActive ?? false,
+    target: config?.target ?? null,
+    lastCheckedAt: toIsoTimestamp(config?.lastCheckedAt),
+    platforms: latest.map((row) => ({
+      platform: row.platform,
+      period: row.period,
+      capturedAt: toIsoTimestamp(row.capturedAt),
+      mentions: row.mentions,
+      citedPages: row.citedPages,
+      shareOfVoicePct: row.shareOfVoicePct,
+      shareOfVoice: row.shareOfVoice?.entries ?? null,
+      delta: row.delta,
+    })),
+    // Oldest first, one point per platform per month.
+    history: history.map((point) => ({
+      platform: point.platform,
+      period: point.period,
+      capturedAt: toIsoTimestamp(point.capturedAt),
+      mentions: point.mentions,
+      citedPages: point.citedPages,
+      shareOfVoicePct: point.shareOfVoicePct,
+    })),
+  };
+}
+
 async function getAudit(projectId: string) {
   const issuesBySeverity = { critical: 0, warning: 0, info: 0 };
   const audit = await AuditRepository.getLatestAuditForProject(projectId);
@@ -341,13 +381,15 @@ async function getSummary(input: {
   const now = input.now ?? new Date();
   const dates = resolvePublicSummaryDates(input.range, now);
 
-  const [rankings, backlinks, audit, gsc, ga4] = await Promise.allSettled([
-    getRankings(project.id, input.range),
-    getBacklinks(project.id, project.domain),
-    getAudit(project.id),
-    getGsc(project.id, dates),
-    getGa4(project.id, dates),
-  ]);
+  const [rankings, backlinks, audit, gsc, ga4, aiVisibility] =
+    await Promise.allSettled([
+      getRankings(project.id, input.range),
+      getBacklinks(project.id, project.domain),
+      getAudit(project.id),
+      getGsc(project.id, dates),
+      getGa4(project.id, dates),
+      getAiVisibility(project.id),
+    ]);
 
   return {
     project: { id: project.id, domain: project.domain },
@@ -358,6 +400,7 @@ async function getSummary(input: {
     audit: unwrap("audit", project.id, audit),
     gsc: unwrap("gsc", project.id, gsc),
     ga4: unwrap("ga4", project.id, ga4),
+    aiVisibility: unwrap("aiVisibility", project.id, aiVisibility),
   };
 }
 
