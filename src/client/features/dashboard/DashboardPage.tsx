@@ -17,6 +17,8 @@ import {
 } from "@/client/features/dashboard/DashboardCards";
 import { Ga4Card } from "@/client/features/dashboard/Ga4Card";
 import { McpConnectCard } from "@/client/features/dashboard/McpConnectCard";
+import { AiVisibilityCard } from "@/client/features/dashboard/AiVisibilityCard";
+import { useAiVisibility } from "@/client/features/ai-search/components/AiVisibilityTracking";
 import { WorkspaceMergeBanner } from "@/client/features/dashboard/WorkspaceMergeBanner";
 import { getStandardErrorMessage } from "@/client/lib/error-messages";
 import type { DashboardActivation } from "@/server/features/dashboard/services/DashboardService";
@@ -245,6 +247,9 @@ export function DashboardPage({ projectId }: { projectId: string }) {
     queryFn: () => getDashboardOverview({ data: { projectId } }),
   });
 
+  // Stored snapshots only (D1); never metered.
+  const aiVisibilityQuery = useAiVisibility(projectId);
+
   const activation = activationQuery.data;
   const overview = overviewQuery.data;
 
@@ -355,6 +360,17 @@ export function DashboardPage({ projectId }: { projectId: string }) {
           },
         ]
       : []),
+    {
+      key: "ai-visibility",
+      hasData: (aiVisibilityQuery.data?.latest.length ?? 0) > 0,
+      node: (
+        <AiVisibilityCard
+          projectId={projectId}
+          domain={activation.domain}
+          data={aiVisibilityQuery.data ?? null}
+        />
+      ),
+    },
   ];
 
   return (
