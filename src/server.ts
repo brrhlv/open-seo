@@ -7,6 +7,7 @@ import { resolveUserContextFromHeaders } from "@/middleware/ensure-user/resolve"
 import { ProjectRepository } from "@/server/features/projects/repositories/ProjectRepository";
 import { SamSessionRepository } from "@/server/features/sam/SamSessionRepository";
 import { runScheduledRankChecks } from "@/server/features/rank-tracking/services/scheduledRankChecks";
+import { runScheduledAiVisibilityChecks } from "@/server/features/ai-visibility/services/scheduledAiVisibilityChecks";
 import { reconcileStaleAudits } from "@/server/features/audit/services/auditReconciler";
 import { getOrCreateOrganizationCustomer } from "@/server/billing/subscription";
 import { isHostedServerAuthMode } from "@/server/lib/runtime-env";
@@ -235,6 +236,14 @@ export default {
     }
     // Scope a per-request Postgres client for the cron run (no-op in D1 mode).
     await withPgClient(() => runScheduledRankChecks(env));
+    // PAI-217: monthly AI-visibility snapshots. After the rank loop so a slow
+    // DataForSEO response can't delay rank checks; its failure can't
+    // suppress them either.
+    try {
+      await withPgClient(() => runScheduledAiVisibilityChecks());
+    } catch (err) {
+      console.error("[cron] AI visibility checks failed:", err);
+    }
     if (watchdogError) throw watchdogError;
   },
 };

@@ -124,6 +124,26 @@ const toolCategories: ToolCategory[] = [
     ],
   },
   {
+    label: "AI Visibility",
+    tools: [
+      {
+        name: "get_ai_visibility",
+        title: "Get AI visibility",
+        description: "Read stored monthly AI mentions and share of voice.",
+      },
+      {
+        name: "create_ai_visibility_tracker",
+        title: "Create AI visibility tracker",
+        description: "Track a brand's AI visibility every month.",
+      },
+      {
+        name: "run_ai_visibility_check",
+        title: "Run AI visibility check",
+        description: "Capture this month's AI visibility snapshot now.",
+      },
+    ],
+  },
+  {
     label: "Local Business",
     tools: [
       {

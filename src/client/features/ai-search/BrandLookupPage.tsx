@@ -19,6 +19,7 @@ import { BrandLookupSearchCard } from "@/client/features/ai-search/components/Br
 import { BrandLookupHistorySection } from "@/client/features/ai-search/components/BrandLookupHistorySection";
 import { AiSearchLoadingState } from "@/client/features/ai-search/components/AiSearchLoadingState";
 import { AiSearchPaidPlanGate } from "@/client/features/ai-search/components/AiSearchPaidPlanGate";
+import { AiVisibilityTrackingCard } from "@/client/features/ai-search/components/AiVisibilityTracking";
 import { useBrandLookupSearchHistory } from "@/client/hooks/useBrandLookupSearchHistory";
 import {
   BRAND_LOOKUP_MAX_INPUT_LENGTH,
@@ -320,15 +321,22 @@ function BrandLookupPageInner({
                     Recent searches
                   </Link>
                 </div>
+                <AiVisibilityTrackingCard
+                  projectId={projectId}
+                  target={trimmedInitialQuery}
+                />
                 <BrandLookupResults result={resultData} projectId={projectId} />
               </>
             ) : !errorMessage ? (
-              <BrandLookupHistorySection
-                projectId={projectId}
-                history={history}
-                historyLoaded={historyLoaded}
-                onRemoveHistoryItem={removeHistoryItem}
-              />
+              <>
+                <AiVisibilityTrackingCard projectId={projectId} />
+                <BrandLookupHistorySection
+                  projectId={projectId}
+                  history={history}
+                  historyLoaded={historyLoaded}
+                  onRemoveHistoryItem={removeHistoryItem}
+                />
+              </>
             ) : null}
           </>
         )}

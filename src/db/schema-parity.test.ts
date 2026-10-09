@@ -7,6 +7,7 @@ import { sort } from "remeda";
 import { describe, expect, it } from "vitest";
 import * as sqliteApp from "./app.schema";
 import * as sqliteProjectContext from "./project-context.schema";
+import * as sqliteAiVisibility from "./ai-visibility.schema";
 import * as sqliteAudit from "./audit.schema";
 import * as sqliteSam from "./sam.schema";
 import * as sqliteAuth from "./better-auth-schema";
@@ -16,6 +17,7 @@ import * as sqliteGsc from "./gsc.schema";
 import * as sqliteTelemetry from "./telemetry.schema";
 import * as pgApp from "./pg/app.schema";
 import * as pgProjectContext from "./pg/project-context.schema";
+import * as pgAiVisibility from "./pg/ai-visibility.schema";
 import * as pgAudit from "./pg/audit.schema";
 import * as pgSam from "./pg/sam.schema";
 import * as pgAuth from "./pg/better-auth-schema";
@@ -147,6 +149,7 @@ function checkNames(table: Table, dialect: Dialect): string[] {
 const sqliteAppTables = tablesFrom(
   sqliteApp,
   sqliteProjectContext,
+  sqliteAiVisibility,
   sqliteAudit,
   sqliteSam,
   sqliteBilling,
@@ -157,6 +160,7 @@ const sqliteAppTables = tablesFrom(
 const pgAppTables = tablesFrom(
   pgApp,
   pgProjectContext,
+  pgAiVisibility,
   pgAudit,
   pgSam,
   pgBilling,

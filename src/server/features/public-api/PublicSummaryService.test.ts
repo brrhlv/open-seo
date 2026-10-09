@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   getPerformance: vi.fn(),
   getOrganicOverview: vi.fn(),
   runReport: vi.fn(),
+  getAiVisibilityConfig: vi.fn(),
+  listRecentAiVisibilitySnapshots: vi.fn(),
 }));
 
 vi.mock("@/server/features/projects/services/ProjectService", () => ({
@@ -67,6 +69,39 @@ vi.mock("@/server/features/ga4/services/Ga4OrganicOverviewService", () => ({
 vi.mock("@/server/features/ga4/services/Ga4ReportingService", () => ({
   Ga4ReportingService: { runReport: mocks.runReport },
 }));
+// Real AiVisibilityService over a mocked repository; the metered Brand Lookup
+// path is stubbed so importing the service never reaches DataForSEO.
+vi.mock(
+  "@/server/features/ai-visibility/repositories/AiVisibilityRepository",
+  () => ({
+    AiVisibilityRepository: {
+      getConfigForProject: mocks.getAiVisibilityConfig,
+      listRecentSnapshots: mocks.listRecentAiVisibilitySnapshots,
+    },
+  }),
+);
+vi.mock("@/server/features/ai-search/services/brandLookup", () => ({
+  getBrandLookup: vi.fn(),
+}));
+vi.mock(
+  "@/server/features/project-context/repositories/ProjectContextRepository",
+  () => ({ ProjectContextRepository: {} }),
+);
+
+/** Stored share_of_voice_json for a target-only leaderboard. */
+function sovJson(targetPct: number) {
+  return JSON.stringify({
+    targetPct,
+    entries: [
+      {
+        label: "socialboothlv.com",
+        isTarget: true,
+        mentions: 4,
+        sharePct: targetPct,
+      },
+    ],
+  });
+}
 
 const NOW = new Date("2026-09-28T12:00:00Z");
 const input = { projectId: "proj-a", range: "last_28_days", now: NOW } as const;
@@ -88,6 +123,8 @@ describe("PublicSummaryService.getSummary", () => {
     mocks.runReport.mockRejectedValue(
       new Ga4ReportError("ga4_not_connected", "not connected"),
     );
+    mocks.getAiVisibilityConfig.mockResolvedValue(null);
+    mocks.listRecentAiVisibilitySnapshots.mockResolvedValue([]);
   });
 
   it("returns null for an unknown or archived project", async () => {
@@ -124,6 +161,13 @@ describe("PublicSummaryService.getSummary", () => {
       },
       gsc: { connected: false },
       ga4: { connected: false },
+      aiVisibility: {
+        tracked: false,
+        target: null,
+        lastCheckedAt: null,
+        platforms: [],
+        history: [],
+      },
     });
   });
 
@@ -185,6 +229,86 @@ describe("PublicSummaryService.getSummary", () => {
           backlinks: 340,
           referringDomains: 55,
           rank: 12,
+        },
+      ],
+    });
+  });
+
+  it("returns the latest AI-visibility snapshot per platform with deltas and history", async () => {
+    mocks.getAiVisibilityConfig.mockResolvedValue({
+      target: "socialboothlv.com",
+      isActive: true,
+      lastCheckedAt: "2026-09-01T06:00:00.000Z",
+    });
+    // Newest first, as the repository returns them.
+    mocks.listRecentAiVisibilitySnapshots.mockResolvedValue([
+      {
+        platform: "google",
+        period: "2026-09",
+        capturedAt: "2026-09-01T06:00:00.000Z",
+        mentions: 12,
+        aiSearchVolume: null,
+        citedPages: 3,
+        topSourcesJson: "[]",
+        samplePromptsJson: "[]",
+        shareOfVoiceJson: sovJson(40),
+        billingCostUsd: 0.4,
+      },
+      {
+        platform: "google",
+        period: "2026-08",
+        capturedAt: "2026-08-01 06:00:00",
+        mentions: 10,
+        aiSearchVolume: null,
+        citedPages: 4,
+        topSourcesJson: "[]",
+        samplePromptsJson: "[]",
+        shareOfVoiceJson: sovJson(35),
+        billingCostUsd: 0.4,
+      },
+    ]);
+
+    const summary = await PublicSummaryService.getSummary(input);
+
+    expect(summary?.aiVisibility).toEqual({
+      tracked: true,
+      target: "socialboothlv.com",
+      lastCheckedAt: "2026-09-01T06:00:00.000Z",
+      platforms: [
+        {
+          platform: "google",
+          period: "2026-09",
+          capturedAt: "2026-09-01T06:00:00.000Z",
+          mentions: 12,
+          citedPages: 3,
+          shareOfVoicePct: 40,
+          shareOfVoice: [
+            {
+              label: "socialboothlv.com",
+              isTarget: true,
+              mentions: 4,
+              sharePct: 40,
+            },
+          ],
+          delta: { mentions: 2, citedPages: -1, shareOfVoicePct: 5 },
+        },
+      ],
+      history: [
+        {
+          platform: "google",
+          period: "2026-08",
+          capturedAt: "2026-08-01T06:00:00.000Z",
+          mentions: 10,
+          citedPages: 4,
+          shareOfVoicePct: 35,
+        },
+        {
+          platform: "google",
+          period: "2026-09",
+          capturedAt: "2026-09-01T06:00:00.000Z",
+          mentions: 12,
+          citedPages: 3,
+          shareOfVoicePct: 40,
         },
       ],
     });
