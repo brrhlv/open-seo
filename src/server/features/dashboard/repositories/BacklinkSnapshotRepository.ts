@@ -18,6 +18,19 @@ async function getLatestForProject(
   return rows[0] ?? null;
 }
 
+/** Newest-first stored snapshots for the project (D1 only, never metered). */
+async function listRecentForProject(
+  projectId: string,
+  limit: number,
+): Promise<BacklinkSnapshot[]> {
+  return db
+    .select()
+    .from(backlinkSnapshots)
+    .where(eq(backlinkSnapshots.projectId, projectId))
+    .orderBy(desc(backlinkSnapshots.id))
+    .limit(limit);
+}
+
 async function insert(
   values: typeof backlinkSnapshots.$inferInsert,
 ): Promise<BacklinkSnapshot> {
@@ -42,6 +55,7 @@ async function updateById(
 
 export const BacklinkSnapshotRepository = {
   getLatestForProject,
+  listRecentForProject,
   insert,
   updateById,
 };
