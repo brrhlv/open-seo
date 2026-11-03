@@ -13,7 +13,7 @@ Built on the PAI-217 model (AI visibility): a config table, a snapshots table, a
 
 - Profile (`my_business_info/live`, `cid:5590594803775798319`): primary **Photo booth**; additional **Balloon artist, Event management company, Event planner, Party equipment rental service**; website `https://socialboothlv.com/`; hours 09:00 to 21:00 every day; 5.0 from 113 reviews; claimed; 115 photos.
 - **Drift on day one:** "Party equipment rental service" is still an additional category. Bryan's accepted state (2026-11-02) says no party-rental category. The first snapshot will report it.
-- Q&A (`questions_and_answers/live`): status 40102 "No Search Results", still billed $0.0054. Google retired the Q&A module on Maps in late 2025, so this is expected to stay empty. Kept in the snapshot so a revived module shows up, and switchable off per project (`include_questions`).
+- Q&A (`questions_and_answers/live`): status 40102 "No Search Results", still billed $0.0054. Google retired the Q&A module on Maps in late 2025, so this is expected to stay empty. **Not collected** (Bryan, 2026-11-03): the watch makes no Q&A call, since it is billed and always empty.
 - Reviews (`reviews/task_post`, depth 20, high priority): settled within 6 s. Newest review 2026-10-29; 3 of the newest 5 have no owner reply.
 - Owner updates were not pulled (the ticket's paid allowance covered profile, reviews and Q&A); the fixture follows the documented `my_business_updates` item shape.
 
@@ -31,7 +31,6 @@ D1 `drizzle/0046_gbp_watch.sql` and Postgres `drizzle-pg/0024_gbp_watch.sql`, ge
 | `cid` | text null | `5590594803775798319`; preferred identifier (`cid:` keyword prefix) |
 | `listing_id` | text null | GBP manager listing id `14154039352732233380`, for the edit-profile link only |
 | `expected_json` | text not null default `'{}'` | the accepted state, below |
-| `include_questions` | boolean not null default true | Q&A costs $0.0054 a run; Google retired the module |
 | `schedule_interval` | text enum `weekly`/`manual`, default `weekly` | |
 | `is_active` | boolean not null default true | |
 | `last_checked_at`, `next_check_at`, `last_error` | text null | same roles as `ai_visibility_configs` |
@@ -63,10 +62,9 @@ Every key is optional. Category names compare case-insensitively after trimming.
 | `title`, `primary_category`, `website`, `phone`, `address`, `description` | text null | profile fields |
 | `additional_categories_json` | text not null default `'[]'` | string array, Google's order |
 | `hours_json` | text null | normalized `{ day: ["HH:MM-HH:MM"] }`; null when Google shows no hours |
-| `latitude`, `longitude` | real null | the profile's pin (Q&A needs a coordinate) |
+| `latitude`, `longitude` | real null | the profile's pin |
 | `rating` | real null, `review_count` integer null, `total_photos` integer null, `is_claimed` boolean null | |
 | `reviews_json` | text null | newest reviews collected this run (depth 10), each with `isNew`; null = not collected this run |
-| `questions_json` | text null | Q&A rows collected; null = not collected (off, or failed) |
 | `updates_json` | text null | owner posts collected (depth 10), each with `isNew`; null = not collected |
 | `changes_json` | text not null default `'[]'` | field changes vs the previous snapshot, computed at write |
 | `billing_cost_usd` | real not null default 0 | real DataForSEO cost via the client's `onCost` hook |
@@ -86,10 +84,8 @@ Watched fields for `changes`: `title`, `primaryCategory`, `additionalCategories`
 
 1. Load the config; `NOT_FOUND` when none. Without `force`, a snapshot captured in the last hour returns `already_captured` (no DataForSEO call).
 2. Through one metered client with an `onCost` accumulator, first the profile: `myBusinessInfo({ keyword: "cid:<cid>" | "place_id:<id>", locationCode, languageCode })` (the project's market). No profile (null item or a failed call) = `UPSTREAM_UNAVAILABLE`, nothing stored, `last_error` set, and no further calls are made.
-3. Then in parallel:
-   - `questionsAnswers({ keyword, locationCoordinate: "<profile lat>,<profile lng>,1000" })` when `include_questions` (the endpoint requires a coordinate, which only the profile knows);
-   - `reviewsTaskPost({ cid | placeId, depth: 10, sortBy: "newest" })` and `updatesTaskPost({ keyword, depth: 10 })`, high priority.
-4. Poll both tasks together, up to 6 times, 4 s apart (the MCP tools' window). A task still pending after that, or any of the three calls failing, is stored as `null` for this run; it never fails the run.
+3. Then in parallel, high priority: `reviewsTaskPost({ cid | placeId, depth: 10, sortBy: "newest" })` and `updatesTaskPost({ keyword, depth: 10 })`. No Q&A call (Google retired the module; DataForSEO still bills it).
+4. Poll both tasks together, up to 6 times, 4 s apart (the MCP tools' window). A task still pending after that, or either call failing, is stored as `null` for this run; it never fails the run.
 5. Build the row: normalize the profile, mark new reviews and posts against the previous lists, diff the watched fields against the previous snapshot, insert, update `last_checked_at` and clear `last_error`.
 
 ## Schedule
@@ -98,21 +94,20 @@ Weekly, Mondays 14:00 UTC (06:00 PT / 07:00 PDT), on the existing `*/5` trigger:
 
 ## Cost
 
-Measured 2026-11-03 per call: profile $0.0054, Q&A $0.0054 (billed even when empty), reviews $0.0015 per 10 at high priority. Owner updates estimated at the same $0.0015 per 10 (not measured; the stored `billing_cost_usd` is the real figure after the first run).
+Measured 2026-11-03 per call: profile $0.0054, reviews $0.0015 per 10 at high priority. Owner updates estimated at the same $0.0015 per 10 (not measured; the stored `billing_cost_usd` is the real figure after the first run). No Q&A call: it cost $0.0054 a run for an always-empty result (dropped by Bryan, 2026-11-03).
 
 | | per run | per month (4.35 weekly runs) |
 |---|---|---|
-| profile + reviews 10 + updates 10 | $0.0084 | $0.037 |
-| + Q&A | $0.0138 | **$0.060** |
-| all 9 projects with Q&A | | $0.54 |
+| profile + reviews 10 + updates 10 | $0.0084 | **$0.037** |
+| all 9 projects | | $0.33 |
 
-Rollout is SBLV only: about **$0.06 a month**. Turning Q&A off (`include_questions: false`) saves $0.023 a month per project; recommended once a month of runs confirms Google returns nothing.
+Rollout is SBLV only: about **$0.04 a month** (was $0.06 with Q&A).
 
 ## MCP tools
 
-- `get_gbp_watch` (read-only, free): config, expected state, latest profile, rating and review count with the change since the previous snapshot, latest 5 reviews, unanswered Q&A, recent owner posts, `changes` (last 90 days) and `driftFromExpected`. No DataForSEO call.
-- `run_gbp_snapshot` (spends credits, about $0.014; the description says so): snapshot now. `force` re-runs inside the one-hour guard.
-- `set_gbp_watch` (writes config, free): create or update the project's watch (`cid` / `placeId` / `listingId`, `expected`, `includeQuestions`, `scheduleInterval`, `active`). Needed for rollout without hand-written SQL; a weekly watch's first run is the next Monday 14:00 UTC.
+- `get_gbp_watch` (read-only, free): config, expected state, latest profile, rating and review count with the change since the previous snapshot, latest 5 reviews, recent owner posts, `changes` (last 90 days) and `driftFromExpected`. No DataForSEO call.
+- `run_gbp_snapshot` (spends credits, about $0.009; the description says so): snapshot now. `force` re-runs inside the one-hour guard.
+- `set_gbp_watch` (writes config, free): create or update the project's watch (`cid` / `placeId` / `listingId`, `expected`, `scheduleInterval`, `active`). Needed for rollout without hand-written SQL; a weekly watch's first run is the next Monday 14:00 UTC.
 
 ## Public summary: `gbp` section (additive)
 
@@ -161,8 +156,6 @@ type GbpSummary = {
     isNew: boolean;                    // first seen in the latest snapshot
   }>;
   newReviewCount: number | null;       // isNew among the latest snapshot's reviews; null when it did not collect reviews
-  questionsAvailable: boolean;         // false when Q&A is off or Google returned no Q&A module
-  unansweredQuestions: Array<{ questionId: string | null; text: string; author: string | null; askedAt: string | null }>;
   ownerUpdates: { latestPostedAt: string | null; newCount: number; recent: Array<{ postedAt: string | null; text: string | null; url: string | null }> } | null;  // null: never collected
   changes: Array<{ field: GbpField; from: string | null; to: string | null; detectedAt: string }>;  // last 90 days, newest first, at most 20
   driftFromExpected: Array<{
@@ -208,8 +201,6 @@ Example (SBLV after the first run, trimmed):
     { "reviewId": "Ci9DQUlRQUNvZENodHljRjlvT2xoQ00xQlpTMUIzWWt0RlNFWTJOSGhRWWxrNU5sRRAB", "author": "Abigail Orberg", "rating": 5, "text": "Christine was amazing to work with from start to finish...", "publishedAt": "2026-10-29T14:38:59.000Z", "ownerReplied": false, "ownerRepliedAt": null, "isNew": false }
   ],
   "newReviewCount": 0,
-  "questionsAvailable": false,
-  "unansweredQuestions": [],
   "ownerUpdates": { "latestPostedAt": null, "newCount": 0, "recent": [] },
   "changes": [],
   "driftFromExpected": [
@@ -218,12 +209,12 @@ Example (SBLV after the first run, trimmed):
 }
 ```
 
-Untracked project: `{ "tracked": false, "placeId": null, "cid": null, "listingId": null, "lastCheckedAt": null, "nextCheckAt": null, "lastError": null, "profile": null, "rating": { all null }, "latestReviews": [], "newReviewCount": 0, "questionsAvailable": false, "unansweredQuestions": [], "ownerUpdates": null, "changes": [], "driftFromExpected": [] }`. A tracked project before its first run has `profile: null`.
+Untracked project: `{ "tracked": false, "placeId": null, "cid": null, "listingId": null, "lastCheckedAt": null, "nextCheckAt": null, "lastError": null, "profile": null, "rating": { all null }, "latestReviews": [], "newReviewCount": null, "ownerUpdates": null, "changes": [], "driftFromExpected": [] }`. A tracked project before its first run has `profile: null`.
 
 ## Files
 
 - `src/db/gbp-watch.schema.ts`, `src/db/pg/gbp-watch.schema.ts`, one export line each in `src/db/d1/schema.ts`, `src/db/pg/schema.ts`, the barrel `src/db/schema.ts` and `schema-parity.test.ts`.
-- `src/server/features/gbp-watch/gbpWatchModel.ts`: pure normalization and diffs (profile, hours, reviews, Q&A, posts, `changes`, `driftFromExpected`, `hoursText`), Zod `gbpExpectedSchema`.
+- `src/server/features/gbp-watch/gbpWatchModel.ts`: pure normalization and diffs (profile, hours, reviews, posts, `changes`, `driftFromExpected`, `hoursText`), Zod `gbpExpectedSchema`.
 - `src/server/features/gbp-watch/repositories/GbpWatchRepository.ts`, `services/GbpWatchService.ts`, `services/scheduledGbpSnapshots.ts`.
 - `src/server/mcp/tools/gbp-watch-tools.ts` (three tools), registered in `src/server/mcp/server.ts`.
 - `src/server/features/public-api/sections/gbp.ts`, registered in `PublicSummaryService.ts` (one import, one `allSettled` entry, one `unwrap` line).
@@ -243,19 +234,19 @@ Untracked project: `{ "tracked": false, "placeId": null, "cid": null, "listingId
 1. Merge after the other wave branches; regenerate the migration if `0046` / `0024` collide.
 2. Deploy (chained alchemy form in `reference_openseo_setup.md`), then apply `drizzle/0046_gbp_watch.sql` to D1 `3c6f2f61-8748-4944-b900-2f857b02059b`.
 3. Create the SBLV watch: MCP `set_gbp_watch` with the SBLV identifiers and the `expected` JSON above, or the D1 insert in the appendix.
-4. First run: MCP `run_gbp_snapshot` for SBLV (about $0.014), or set `next_check_at` to now and let the `*/5` tick take it. Check `get_gbp_watch` shows the party-rental drift.
+4. First run: MCP `run_gbp_snapshot` for SBLV (about $0.009), or set `next_check_at` to now and let the `*/5` tick take it. Check `get_gbp_watch` shows the party-rental drift.
 5. Then deploy the admin branch. Its card and alert read `gbp` when present and say "not available yet" when absent, so the order between the two deploys is not critical.
 
 ## Appendix: D1 insert for step 3
 
 ```sql
-INSERT INTO gbp_configs (id, project_id, place_id, cid, listing_id, expected_json, include_questions, schedule_interval, is_active, next_check_at)
+INSERT INTO gbp_configs (id, project_id, place_id, cid, listing_id, expected_json, schedule_interval, is_active, next_check_at)
 VALUES (lower(hex(randomblob(16))), 'c65ed7c9-ee05-4b6d-a61f-8817c7a003ae', 'ChIJuy0JGkfryIARL3wzklrIlU0', '5590594803775798319', '14154039352732233380',
-  '<expected JSON above, one line>', 1, 'weekly', 1, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+  '{"primaryCategory":"Photo booth","allowedAdditionalCategories":["Balloon artist","Event management company","Event planner"],"forbiddenCategories":["Wedding service","Wedding photographer","Photographer","Photography service","Party equipment rental service"],"website":"https://socialboothlv.com/","hours":{"monday":["09:00-21:00"],"tuesday":["09:00-21:00"],"wednesday":["09:00-21:00"],"thursday":["09:00-21:00"],"friday":["09:00-21:00"],"saturday":["09:00-21:00"],"sunday":["09:00-21:00"]}}', 'weekly', 1, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
 ```
 
-## Decisions for Bryan
+## Decisions (Bryan)
 
-1. **Remove "Party equipment rental service" from the SBLV profile?** It is live today and conflicts with the accepted state. Until it is removed (or the accepted state changes), the admin shows a drift alert.
-2. Are "Balloon artist" and "Event planner" accepted secondaries? The seed allows them; dropping them from `allowedAdditionalCategories` makes them drift.
-3. Keep Q&A on for the first month, then turn it off? Google returns no Q&A module today.
+1. **"Party equipment rental service" on the SBLV profile: open.** It is live today and conflicts with the accepted state, so the admin shows the drift alert until it is removed or accepted. Leave the alert as is.
+2. Balloon artist and Event planner are accepted secondaries (2026-11-03): they are in the seed's `allowedAdditionalCategories`, so with the live profile the only drift is party rental.
+3. Q&A dropped (2026-11-03): Google retired it, DataForSEO still bills it.
