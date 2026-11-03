@@ -76,7 +76,7 @@ beforeAll(async () => {
   vi.doMock("@/db", () => ({ db: testDb }));
   const migrations = [
     "drizzle/0045_ai_visibility.sql",
-    "drizzle/0046_ai_visibility_prompts.sql",
+    "drizzle/0049_ai_visibility_prompts.sql",
   ]
     .map((path) =>
       readFileSync(path, "utf8").replaceAll("--> statement-breakpoint", ""),
