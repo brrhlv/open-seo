@@ -19,6 +19,10 @@ import {
 import { requestWithPublicOrigin } from "@/server/mcp/public-origin";
 import { MCP_ROUTE } from "@/server/mcp/context";
 import { handleSelfHostedOpenSeoMcpRequest } from "@/server/mcp/transport";
+import {
+  handleHeadlessMcpRequest,
+  MCP_HEADLESS_ROUTE,
+} from "@/server/mcp/headless-auth";
 import { withPgClient } from "@/db";
 import {
   AUTUMN_WEBHOOK_PATH,
@@ -167,6 +171,12 @@ function handleFetch(
       env as OpenSeoOAuthEnv,
       ctx,
     );
+  }
+
+  // PAI-254: service token + oseo_ key, for agents and crons (off unless
+  // MCP_HEADLESS_POLICY_AUD and OPENSEO_MCP_API_KEYS are set).
+  if (authMode === "cloudflare_access" && pathname === MCP_HEADLESS_ROUTE) {
+    return handleHeadlessMcpRequest(publicRequest, env, ctx);
   }
 
   if (
