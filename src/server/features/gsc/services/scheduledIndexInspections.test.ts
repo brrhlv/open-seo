@@ -255,7 +255,7 @@ describe("runScheduledIndexInspections", () => {
     await client.executeMultiple(
       project("a", "sc-domain:a.com", ["https://a.com/x"]),
     );
-    let release: () => void = () => {};
+    let release: (() => void) | undefined;
     mocks.inspectUrls.mockImplementationOnce(
       (input) =>
         new Promise((resolve) => {
@@ -266,7 +266,7 @@ describe("runScheduledIndexInspections", () => {
     const first = Scheduler.runScheduledIndexInspections(NOW);
     await vi.waitFor(() => expect(mocks.inspectUrls).toHaveBeenCalledTimes(1));
     await Scheduler.runScheduledIndexInspections(NOW);
-    release();
+    release?.();
     await first;
 
     expect(mocks.inspectUrls).toHaveBeenCalledTimes(1);
