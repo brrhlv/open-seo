@@ -8,3 +8,4 @@ export * from "./billing.schema";
 export * from "./ga4.schema";
 export * from "./gsc.schema";
 export * from "./telemetry.schema";
+export * from "./index-status.schema";
