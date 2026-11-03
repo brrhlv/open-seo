@@ -104,21 +104,21 @@ describe("getSavedKeywordsSection", () => {
     ]);
   });
 
-  it("reads the newest 250 and flags a longer list as truncated", async () => {
+  it("reads the newest 100 and flags a longer list as truncated", async () => {
     mocks.listSavedKeywordsByProject.mockResolvedValue({
-      totalCount: 300,
+      totalCount: 150,
       tags: [],
       rows: [listRow("a", null, [])],
     });
 
     const section = await getSavedKeywordsSection("proj-a");
 
-    expect(section).toMatchObject({ totalCount: 300, truncated: true });
+    expect(section).toMatchObject({ totalCount: 150, truncated: true });
     expect(mocks.listSavedKeywordsByProject).toHaveBeenCalledWith(
       expect.objectContaining({
         projectId: "proj-a",
         page: 1,
-        pageSize: 250,
+        pageSize: 100,
         sort: "createdAt",
         order: "desc",
       }),

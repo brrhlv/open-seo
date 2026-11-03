@@ -5,9 +5,11 @@ import { toIsoTimestamp } from "../timestamps";
 
 // CLIENT-SBLV-196: the project's saved keywords (D1 only, no DataForSEO), so
 // an external dashboard can turn tagged keywords into work (the SBLV admin's
-// blog calendar reads `blog-idea`). The whole list, newest first, capped;
-// consumers filter by tag because the summary is cached per project + range.
-const SAVED_KEYWORD_LIMIT = 250;
+// blog calendar reads `blog-idea`). The newest saved first, capped; consumers
+// filter by tag because the summary is cached per project + range. The cap
+// keeps the section small (~36 KB raw at 100 rows) because every summary
+// fetch carries it, including the admin dashboard tile with a 5 s timeout.
+const SAVED_KEYWORD_LIMIT = 100;
 
 export async function getSavedKeywordsSection(projectId: string) {
   const { rows, totalCount, tags } = await getSavedKeywords({
