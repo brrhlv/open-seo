@@ -66,6 +66,15 @@ vi.mock("@/server/features/ga4/services/Ga4OrganicOverviewService", () => ({
     getOrganicOverview: mocks.getOrganicOverview,
   },
 }));
+// PAI-255: the buyer-prompts key has its own test (sections/).
+const NO_PROMPTS = { lastRunAt: null, nextRunAt: null, items: [] };
+vi.mock("./sections/aiVisibilityPrompts", () => ({
+  getAiVisibilityPromptsSection: async () => ({
+    lastRunAt: null,
+    nextRunAt: null,
+    items: [],
+  }),
+}));
 vi.mock("@/server/features/ga4/services/Ga4ReportingService", () => ({
   Ga4ReportingService: { runReport: mocks.runReport },
 }));
@@ -167,6 +176,7 @@ describe("PublicSummaryService.getSummary", () => {
         lastCheckedAt: null,
         platforms: [],
         history: [],
+        prompts: NO_PROMPTS,
       },
     });
   });
@@ -311,6 +321,7 @@ describe("PublicSummaryService.getSummary", () => {
           shareOfVoicePct: 40,
         },
       ],
+      prompts: NO_PROMPTS,
     });
   });
 

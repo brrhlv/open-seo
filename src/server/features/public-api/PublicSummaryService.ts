@@ -27,6 +27,7 @@ import {
   resolvePublicSummaryDates,
   type PublicSummaryRange,
 } from "./publicSummaryRange";
+import { getAiVisibilityPromptsSection } from "./sections/aiVisibilityPrompts";
 import { toIsoTimestamp } from "./timestamps";
 
 // Read-only project summary for external dashboards (PAI-222). Every read is
@@ -244,6 +245,8 @@ async function getAiVisibility(projectId: string) {
       citedPages: point.citedPages,
       shareOfVoicePct: point.shareOfVoicePct,
     })),
+    // PAI-255: buyer prompts; fails on its own as { error }.
+    prompts: await getAiVisibilityPromptsSection(projectId),
   };
 }
 
