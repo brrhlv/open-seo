@@ -117,18 +117,17 @@ describe("createTracker", () => {
     expect(config.nextCheckAt).toBe("2026-11-02T07:00:00.000Z");
   });
 
-  it("lowercases keywords and refuses a 5x5 grid on Workers Free", async () => {
+  it("lowercases keywords and accepts a 5x5 grid", async () => {
     const { keywords } = await track(["Photo Booth LAS VEGAS"]);
     expect(keywords).toEqual(["photo booth las vegas"]);
-    await expect(
-      Service.LocalGridService.createTracker({
-        projectId: PROJECT,
-        keywords: ["a"],
-        target: TARGET,
-        center: CENTER,
-        gridSize: 5,
-      }),
-    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    const { config } = await Service.LocalGridService.createTracker({
+      projectId: PROJECT,
+      keywords: ["a"],
+      target: TARGET,
+      center: CENTER,
+      gridSize: 5,
+    });
+    expect(config.gridSize).toBe(5);
   });
 });
 
@@ -201,21 +200,23 @@ describe("runCheck limits", () => {
   const now = new Date("2026-11-02T07:00:00Z");
   const run = { projectId: PROJECT, billingCustomer: BILLING, now };
 
-  it("caps a run by calls: three 3x3 keywords, one 5x5 keyword", async () => {
-    await track(["a", "b", "c", "d"]);
-    expect((await Service.LocalGridService.runCheck(run)).checked).toHaveLength(
-      3,
-    );
-    // A 5x5 row stored before the cap (or edited in D1): 25 calls, one keyword.
+  it("caps a run at 75 Maps calls: eight 3x3 keywords, three 5x5 ones", async () => {
+    const nine = ["a", "b", "c", "d", "e", "f", "g", "h", "i"];
+    await track(nine);
+    const three = await Service.LocalGridService.runCheck(run);
+    expect(three.checked).toHaveLength(8);
+    expect(three.remaining).toEqual(["i"]);
+    expect(mocks.local).toHaveBeenCalledTimes(72);
+
     await client.execute("UPDATE local_grid_configs SET grid_size = 5");
     mocks.local.mockClear();
     const five = await Service.LocalGridService.runCheck({
       ...run,
       force: true,
     });
-    expect(five.checked).toHaveLength(1);
-    expect(mocks.local).toHaveBeenCalledTimes(25);
-    expect(Service.keywordsPerRun(3)).toBe(3);
+    expect(five.checked).toHaveLength(3);
+    expect(mocks.local).toHaveBeenCalledTimes(75);
+    expect([3, 5].map(Service.keywordsPerRun)).toEqual([8, 3]);
   });
 
   it("matches keywords whatever their case", async () => {

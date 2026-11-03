@@ -71,7 +71,12 @@ const START = "2026-12-02T07:00:00.000Z";
 function tracker(
   id: string,
   keywords: string[],
-  options: { next?: string; schedule?: string; leaseUntil?: string } = {},
+  options: {
+    next?: string;
+    schedule?: string;
+    leaseUntil?: string;
+    gridSize?: number;
+  } = {},
 ) {
   const lease = options.leaseUntil ? `'${options.leaseUntil}'` : "NULL";
   const rows = keywords.map(
@@ -80,8 +85,8 @@ function tracker(
   );
   return `
     INSERT INTO projects (id, organization_id, name) VALUES ('p-${id}', 'org-1', '${id}');
-    INSERT INTO local_grid_configs (id, project_id, target_cid, center_latitude, center_longitude, schedule_interval, next_check_at, lease_until)
-      VALUES ('${id}', 'p-${id}', '559', 36.2, -115.2, '${options.schedule ?? "monthly"}', '${options.next ?? START}', ${lease});
+    INSERT INTO local_grid_configs (id, project_id, target_cid, center_latitude, center_longitude, grid_size, schedule_interval, next_check_at, lease_until)
+      VALUES ('${id}', 'p-${id}', '559', 36.2, -115.2, ${options.gridSize ?? 3}, '${options.schedule ?? "monthly"}', '${options.next ?? START}', ${lease});
     ${rows.join("\n")}
   `;
 }
@@ -115,9 +120,10 @@ beforeEach(async () => {
 });
 
 describe("runScheduledLocalGridChecks", () => {
-  it("grids one keyword of the oldest due tracker per tick, then waits for the next 2nd", async () => {
+  it("grids up to 75 calls of the oldest due tracker per tick, then waits for the next 2nd", async () => {
+    // 5x5: 25 calls a keyword, so three keywords a tick.
     await client.executeMultiple(
-      tracker("older", ["a", "b"]) +
+      tracker("older", ["a", "b", "c", "d"], { gridSize: 5 }) +
         tracker("newer", ["x"], { next: "2026-12-02T07:06:00.000Z" }) +
         tracker("future", ["y"], { next: "2027-01-02T07:00:00.000Z" }) +
         tracker("manual", ["z"], { schedule: "manual" }) +
@@ -126,12 +132,13 @@ describe("runScheduledLocalGridChecks", () => {
           leaseUntil: "2026-12-02T07:12:00.000Z",
         }),
     );
-    expect(await tick("2026-12-02T07:05:00.000Z")).toEqual(["a"]);
+    expect(await tick("2026-12-02T07:05:00.000Z")).toEqual(["a", "b", "c"]);
+    expect(mocks.calls).toHaveLength(75);
     expect(await config("older")).toMatchObject({
       next_check_at: "2026-12-02T07:05:00.000Z",
       lease_until: null,
     });
-    expect(await tick("2026-12-02T07:10:00.000Z")).toEqual(["b"]);
+    expect(await tick("2026-12-02T07:10:00.000Z")).toEqual(["d"]);
     expect((await config("older"))?.next_check_at).toBe(
       "2027-01-02T07:00:00.000Z",
     );
@@ -156,20 +163,18 @@ describe("runScheduledLocalGridChecks", () => {
   });
 
   it("a keyword that keeps failing goes behind the others and stops after three tries", async () => {
-    await client.executeMultiple(tracker("t", ["a", "b", "c"]));
+    await client.executeMultiple(
+      tracker("t", ["a", "b", "c", "d", "e"], { gridSize: 5 }),
+    );
     mocks.behaviour.set("a", "throw");
 
-    const ran = [
-      await tick("2026-12-02T07:05:00.000Z"), // a fails (1)
-      await tick("2026-12-02T07:10:00.000Z"),
-      await tick("2026-12-02T07:15:00.000Z"),
-    ];
-    expect(ran).toEqual([["a"], ["b"], ["c"]]);
+    expect(await tick("2026-12-02T07:05:00.000Z")).toEqual(["a", "b", "c"]); // a (1)
+    // Untried d and e go before a's retry.
+    expect(await tick("2026-12-02T07:10:00.000Z")).toEqual(["d", "e", "a"]); // a (2)
     // Only a's retry is left: after the delay, not on the next tick.
-    expect((await config("t"))?.next_check_at).toBe("2026-12-02T13:15:00.000Z");
+    expect((await config("t"))?.next_check_at).toBe("2026-12-02T13:10:00.000Z");
 
-    expect(await tick("2026-12-02T13:15:00.000Z")).toEqual(["a"]); // (2)
-    expect(await tick("2026-12-02T19:15:00.000Z")).toEqual(["a"]); // (3)
+    expect(await tick("2026-12-02T13:10:00.000Z")).toEqual(["a"]); // a (3)
     expect(await config("t")).toMatchObject({
       next_check_at: "2027-01-02T07:00:00.000Z",
       last_error: "a: a upstream down",

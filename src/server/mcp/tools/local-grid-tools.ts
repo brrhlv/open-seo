@@ -3,6 +3,7 @@ import {
   estimateGridCostUsd,
   LocalGridService,
   keywordsPerRun,
+  MAX_CALLS_PER_RUN,
   MAX_ATTEMPTS_PER_MONTH,
   MAX_GRID_KEYWORDS,
 } from "@/server/features/local-grid/services/LocalGridService";
@@ -23,6 +24,7 @@ import { languageCodeSchema, projectIdSchema } from "@/server/mcp/schemas";
 
 const keywordSchema = z.string().trim().min(1).max(120);
 const PER_KEYWORD_3X3 = estimateGridCostUsd(3, 1);
+const PER_KEYWORD_5X5 = estimateGridCostUsd(5, 1);
 
 // ---------------------------------------------------------------------------
 // create_local_grid_tracker
@@ -58,10 +60,10 @@ const createInputSchema = {
     })
     .describe("Grid center, usually the Google Business Profile pin."),
   gridSize: z
-    .literal(3)
+    .union([z.literal(3), z.literal(5)])
     .optional()
     .describe(
-      "3 (9 searches per keyword). 5x5 (25 per keyword) is refused until the Worker is on a paid plan: a cron tick on Workers Free cannot make that many calls.",
+      "3 (default: 9 searches per keyword, about $0.018 a run) or 5 (25 searches per keyword, about $0.05 a run).",
     ),
   spacingKm: z
     .number()
@@ -85,7 +87,7 @@ export const createLocalGridTrackerTool = {
   name: "create_local_grid_tracker",
   config: {
     title: "Create local grid tracker",
-    description: `Create (or update) the project's stored Maps rank grid: keywords, business (placeId/cid), center, grid size and spacing. One tracker per project; calling again replaces it and its keyword list (stored history stays) and resets the next scheduled run to the next 2nd of the month. Keywords are stored lowercased. Uses no credits and starts no run. A monthly tracker spends credits on the 2nd of each month: a 3x3 grid is 9 SERP calls per keyword (about $${PER_KEYWORD_3X3.toFixed(3)}). Call get_local_grid first to see an existing tracker.`,
+    description: `Create (or update) the project's stored Maps rank grid: keywords, business (placeId/cid), center, grid size and spacing. One tracker per project; calling again replaces it and its keyword list (stored history stays) and resets the next scheduled run to the next 2nd of the month. Keywords are stored lowercased. Uses no credits and starts no run. A monthly tracker spends credits on the 2nd of each month: a 3x3 grid is 9 SERP calls per keyword (about $${PER_KEYWORD_3X3.toFixed(3)}), a 5x5 grid 25 (about $${PER_KEYWORD_5X5.toFixed(3)}). Call get_local_grid first to see an existing tracker.`,
     inputSchema: createInputSchema,
     outputSchema: z
       .object({
@@ -156,7 +158,7 @@ export const runLocalGridTool = {
   name: "run_local_grid",
   config: {
     title: "Run local grid now",
-    description: `Grid the tracker's keywords now and store the result for this month. This spends credits: a 3x3 grid is 9 SERP calls per keyword (about $${PER_KEYWORD_3X3.toFixed(3)}). At most ${keywordsPerRun(3)} keywords per call on 3x3 (27 calls); the rest come back as remaining. Free for keywords already gridded this month (unless force is set). A keyword whose grid fails, or comes back with over a third of its points failed, is retried later, up to ${MAX_ATTEMPTS_PER_MONTH} times a month. Refused while another run (the monthly cron or another call) holds the tracker. Show the user the estimate before calling. Requires a tracker from create_local_grid_tracker; read results with get_local_grid.`,
+    description: `Grid the tracker's keywords now and store the result for this month. This spends credits: a 3x3 grid is 9 SERP calls per keyword (about $${PER_KEYWORD_3X3.toFixed(3)}), a 5x5 grid 25 (about $${PER_KEYWORD_5X5.toFixed(3)}). A call makes at most ${MAX_CALLS_PER_RUN} Maps calls: ${keywordsPerRun(3)} keywords on 3x3, ${keywordsPerRun(5)} on 5x5; the rest come back as remaining. Free for keywords already gridded this month (unless force is set). A keyword whose grid fails, or comes back with over a third of its points failed, is retried later, up to ${MAX_ATTEMPTS_PER_MONTH} times a month. Refused while another run (the monthly cron or another call) holds the tracker. Show the user the estimate before calling. Requires a tracker from create_local_grid_tracker; read results with get_local_grid.`,
     inputSchema: runInputSchema,
     outputSchema: z
       .object({

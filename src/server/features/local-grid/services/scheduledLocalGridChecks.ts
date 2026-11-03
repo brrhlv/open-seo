@@ -2,21 +2,20 @@ import { LocalGridRepository } from "@/server/features/local-grid/repositories/L
 import { LocalGridService } from "@/server/features/local-grid/services/LocalGridService";
 import { AppError } from "@/server/lib/errors";
 
-// One keyword is gridSize² Maps calls made inline (9 on a 3×3). Workers Free
-// caps a cron invocation at 50 subrequests and the rank and AI-visibility
-// loops share the tick, so each tick grids one keyword of one tracker. A
-// tracker with untried keywords stays due and the next */5 tick continues it,
-// so three keywords drain in ~15 minutes. runCheck holds the tracker's lease
-// (shared with run_local_grid), orders untried keywords before retries, caps
-// retries per month, and sets the next run.
+// A keyword is gridSize² Maps calls made inline (9 on 3×3, 25 on 5×5). Each
+// tick runs one tracker, and runCheck caps it at 75 calls (keywordsPerRun):
+// all of SBLV's three 3×3 keywords at once, or three 5×5 keywords. A tracker
+// with untried keywords left stays due and the next */5 tick continues it.
+// runCheck holds the tracker's lease (shared with run_local_grid), orders
+// untried keywords before retries, caps retries per month, and sets the next
+// run.
 const TRACKERS_PER_TICK = 1;
-const KEYWORDS_PER_TICK = 1;
 
 // A run that throws as a whole (credits, auth, D1) retries after this delay.
 const RETRY_DELAY_MS = 6 * 60 * 60_000;
 
 /**
- * Cron body: grid the next due keyword of a monthly tracker (CLIENT-SBLV-191).
+ * Cron body: grid the due keywords of the next monthly tracker (CLIENT-SBLV-191).
  * Runs beside the rank and AI-visibility loops on the `*\/5` trigger.
  */
 export async function runScheduledLocalGridChecks(now = new Date()) {
@@ -35,7 +34,6 @@ export async function runScheduledLocalGridChecks(now = new Date()) {
           organizationId: config.organizationId,
           projectId: config.projectId,
         },
-        limit: KEYWORDS_PER_TICK,
         now,
       });
       (result.failed.length > 0 ? console.error : console.log)({

@@ -16,12 +16,10 @@ import { AppError } from "@/server/lib/errors";
  */
 
 export const MAX_GRID_KEYWORDS = 10;
-// A run makes its Maps calls inline in one request or cron tick. Workers Free
-// allows 50 subrequests per invocation and the cron tick shares them with the
-// rank and AI-visibility loops, so a run stays at or under 27 calls: three
-// 3×3 keywords. A 5×5 grid (25 calls per keyword) needs Workers Paid.
-const MAX_CALLS_PER_RUN = 27;
-const MAX_GRID_POINTS = 9;
+// A run makes its Maps calls inline in one request or cron tick (Workers
+// Paid since 2026-10-09, default limits). Each run is capped at 75 calls: three
+// 5×5 keywords or eight 3×3 ones; the rest wait for the next run or tick.
+export const MAX_CALLS_PER_RUN = 75;
 // A keyword that fails or comes back degraded this many times in a month is
 // left until next month, so it cannot starve the others.
 export const MAX_ATTEMPTS_PER_MONTH = 3;
@@ -113,12 +111,6 @@ async function createTracker(input: {
     );
   }
   const gridSize = input.gridSize ?? 3;
-  if (gridSize * gridSize > MAX_GRID_POINTS) {
-    throw new AppError(
-      "VALIDATION_ERROR",
-      `A ${gridSize}x${gridSize} grid is ${gridSize * gridSize} Maps calls per keyword, more than a Workers Free cron tick can make beside the rank checks. Use 3x3 until the Worker is on a paid plan.`,
-    );
-  }
   const scheduleInterval = input.scheduleInterval ?? "monthly";
   const config = await LocalGridRepository.upsertConfig({
     projectId: input.projectId,
