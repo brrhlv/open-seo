@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   runReport: vi.fn(),
   getAiVisibilityConfig: vi.fn(),
   listRecentAiVisibilitySnapshots: vi.fn(),
+  getGbpSection: vi.fn(),
 }));
 
 vi.mock("@/server/features/projects/services/ProjectService", () => ({
@@ -80,6 +81,8 @@ vi.mock(
     },
   }),
 );
+// CLIENT-SBLV-193: the section is covered in GbpWatchService.test.ts.
+vi.mock("./sections/gbp", () => ({ getGbpSection: mocks.getGbpSection }));
 vi.mock("@/server/features/ai-search/services/brandLookup", () => ({
   getBrandLookup: vi.fn(),
 }));
@@ -125,6 +128,7 @@ describe("PublicSummaryService.getSummary", () => {
     );
     mocks.getAiVisibilityConfig.mockResolvedValue(null);
     mocks.listRecentAiVisibilitySnapshots.mockResolvedValue([]);
+    mocks.getGbpSection.mockResolvedValue({ tracked: false, profile: null });
   });
 
   it("returns null for an unknown or archived project", async () => {
@@ -168,7 +172,17 @@ describe("PublicSummaryService.getSummary", () => {
         platforms: [],
         history: [],
       },
+      gbp: { tracked: false, profile: null },
     });
+    expect(mocks.getGbpSection).toHaveBeenCalledWith("proj-a", NOW);
+  });
+
+  it("fails the gbp section alone", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.getGbpSection.mockRejectedValue(new Error("d1 down"));
+    const summary = await PublicSummaryService.getSummary(input);
+    expect(summary?.gbp).toEqual({ error: "internal_error" });
+    expect(summary?.audit).toMatchObject({ status: "none" });
   });
 
   it("turns a failing section into an error code without failing the others", async () => {
