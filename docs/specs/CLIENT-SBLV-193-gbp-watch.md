@@ -51,7 +51,7 @@ Indexes: unique `(project_id)`, `(is_active, next_check_at)` for the due query. 
 }
 ```
 
-Every key is optional. Category names compare case-insensitively after trimming. Websites compare after lowercasing and dropping one trailing slash (scheme kept: `http://` vs `https://` is drift, which is what the June audit fixed). Hours compare as the normalized map (a day missing or `[]` = closed).
+Every key is optional. Category names compare case-insensitively after trimming. Websites compare by scheme, host (both lowercased) and path (case kept), with one trailing slash and `utm_*` parameters ignored; `http://` vs `https://` is drift, which is what the June audit fixed. Hours compare as the normalized map with each day's slots sorted (a day missing or `[]` = closed).
 
 ### `gbp_snapshots` (one row per run)
 
@@ -59,6 +59,7 @@ Every key is optional. Category names compare case-insensitively after trimming.
 |---|---|---|
 | `id` | integer PK autoincrement (serial on PG) | |
 | `project_id` | text FK cascade | |
+| `identifier` | text null | `cid:<cid>` or `place_id:<id>` the run used; a row with a different identifier than the one before starts a new baseline (no diff, nothing new, no rating change) |
 | `title`, `primary_category`, `website`, `phone`, `address`, `description` | text null | profile fields |
 | `additional_categories_json` | text not null default `'[]'` | string array, Google's order |
 | `hours_json` | text null | normalized `{ day: ["HH:MM-HH:MM"] }`; null when Google shows no hours |
@@ -77,6 +78,8 @@ Index `(project_id, captured_at)`.
 
 `changes` are stored (they are facts about two snapshots and never change). `driftFromExpected` is computed at read time against the current `expected_json`, so editing the accepted state clears or raises drift without a new paid run.
 
+Omitted fields: DataForSEO sometimes leaves out `work_time`, `is_claimed` or `additional_categories` for a profile that has them. When the new value is missing or empty and the previous one was set, the run keeps (and stores) the previous value, so it never reports "Hours: … to none" one week and back the next. A real new value always wins.
+
 Watched fields for `changes`: `title`, `primaryCategory`, `additionalCategories`, `website`, `phone`, `address`, `hours`, `isClaimed`. Not watched: rating and review count (reported as a change line, not an alert), description, photos.
 
 ## Run (`GbpWatchService.runSnapshot`)
@@ -91,7 +94,7 @@ Watched fields for `changes`: `title`, `primaryCategory`, `additionalCategories`
 
 ## Schedule
 
-Weekly, Mondays 14:00 UTC (06:00 PT / 07:00 PDT), on the existing `*/5` trigger: `runScheduledGbpSnapshots()` runs after the AI-visibility loop in `src/server.ts`, one due config per tick (a run is 4 DataForSEO calls plus up to 12 polls; Workers Free caps an invocation at 50 subrequests and the rank loop shares it). Claim by compare-and-set on `next_check_at` (same as AI visibility); a failed run retries after 6 hours. No new cron expression.
+Weekly, Mondays 14:00 UTC (06:00 PT / 07:00 PDT), on the existing `*/5` trigger: `runScheduledGbpSnapshots()` runs after the AI-visibility loop in `src/server.ts`, one due config per tick (a run is 4 DataForSEO calls plus up to 12 polls; Workers Free caps an invocation at 50 subrequests and the rank loop shares it). Claim by compare-and-set on `next_check_at` (same as AI visibility). A failed Monday run retries once, 6 hours later; a failed retry records `last_error` and waits for the next Monday (the claim already moved `next_check_at` there). `runSnapshot` never throws once the snapshot row is saved, so a retry never pays twice. No new cron expression.
 
 ## Cost
 
@@ -157,7 +160,7 @@ type GbpSummary = {
     ownerRepliedAt: string | null;
     isNew: boolean;                    // first seen in the latest snapshot
   }>;
-  newReviewCount: number;              // isNew among the reviews collected by the latest snapshot
+  newReviewCount: number | null;       // isNew among the latest snapshot's reviews; null when it did not collect reviews
   questionsAvailable: boolean;         // false when Q&A is off or Google returned no Q&A module
   unansweredQuestions: Array<{ questionId: string | null; text: string; author: string | null; askedAt: string | null }>;
   ownerUpdates: { latestPostedAt: string | null; newCount: number; recent: Array<{ postedAt: string | null; text: string | null; url: string | null }> } | null;  // null: never collected
