@@ -107,10 +107,13 @@ async function getDuePromptsWithOrganization(nowIso: string, limit: number) {
     .limit(limit);
 }
 
-/** Compare-and-set on next_run_at so overlapping ticks can't double-run. */
-async function claimDuePrompt(input: {
+/**
+ * Compare-and-set on next_run_at: the cron and "run now" both take this
+ * lease, so overlapping ticks or concurrent calls can't double-run a prompt.
+ */
+async function claimPrompt(input: {
   promptId: string;
-  observedNextRunAt: string;
+  observedNextRunAt: string | null;
   nextRunAt: string;
 }): Promise<boolean> {
   const claimed = await db
@@ -120,11 +123,57 @@ async function claimDuePrompt(input: {
       and(
         eq(aiVisibilityPrompts.id, input.promptId),
         eq(aiVisibilityPrompts.isActive, true),
-        eq(aiVisibilityPrompts.nextRunAt, input.observedNextRunAt),
+        input.observedNextRunAt === null
+          ? isNull(aiVisibilityPrompts.nextRunAt)
+          : eq(aiVisibilityPrompts.nextRunAt, input.observedNextRunAt),
       ),
     )
     .returning({ id: aiVisibilityPrompts.id });
   return claimed.length > 0;
+}
+
+/** This month's DataForSEO spend on the project's buyer prompts. */
+async function sumProjectCostForPeriod(
+  projectId: string,
+  period: string,
+): Promise<number> {
+  const rows = await db
+    .select({
+      total: sql<number>`coalesce(sum(${aiVisibilityPromptResults.costUsd}), 0)`,
+    })
+    .from(aiVisibilityPromptResults)
+    .innerJoin(
+      aiVisibilityPrompts,
+      eq(aiVisibilityPromptResults.promptId, aiVisibilityPrompts.id),
+    )
+    .where(
+      and(
+        eq(aiVisibilityPrompts.projectId, projectId),
+        eq(aiVisibilityPromptResults.period, period),
+      ),
+    );
+  return Number(rows[0]?.total ?? 0);
+}
+
+/** Prompts (active or removed) that already ran for the project this month. */
+async function listPromptIdsRunForPeriod(
+  projectId: string,
+  period: string,
+): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ promptId: aiVisibilityPromptResults.promptId })
+    .from(aiVisibilityPromptResults)
+    .innerJoin(
+      aiVisibilityPrompts,
+      eq(aiVisibilityPromptResults.promptId, aiVisibilityPrompts.id),
+    )
+    .where(
+      and(
+        eq(aiVisibilityPrompts.projectId, projectId),
+        eq(aiVisibilityPromptResults.period, period),
+      ),
+    );
+  return rows.map((row) => row.promptId);
 }
 
 async function listResultsForPeriod(
@@ -202,7 +251,9 @@ export const AiVisibilityPromptRepository = {
   updatePrompt,
   deactivatePrompts,
   getDuePromptsWithOrganization,
-  claimDuePrompt,
+  claimPrompt,
+  sumProjectCostForPeriod,
+  listPromptIdsRunForPeriod,
   listResultsForPeriod,
   listRecentResults,
   upsertResults,

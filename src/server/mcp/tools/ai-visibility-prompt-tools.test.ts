@@ -59,10 +59,10 @@ describe("AI visibility buyer prompt MCP tools", () => {
 
   it("add and run state the per-prompt cost up front", async () => {
     expect(addAiVisibilityPromptsTool.config.description).toMatch(
-      /about \$0\.014 per prompt per month/,
+      /about \$0\.015 per prompt per month/,
     );
     expect(runAiVisibilityPromptsTool.config.description).toMatch(
-      /spends credits: about \$0\.014 per prompt/,
+      /spends credits: about \$0\.015 per prompt/,
     );
     mocks.addPrompts.mockResolvedValue({
       added: 2,
@@ -75,7 +75,7 @@ describe("AI visibility buyer prompt MCP tools", () => {
       .parse({ projectId, prompts: ["one prompt", "two prompt"] });
     const result = await addAiVisibilityPromptsTool.handler(args, toolContext);
     expect(textContent(result)).toContain(
-      "2 prompts will run on the next cron tick (about $0.028)",
+      "2 prompts will run on the next cron tick (about $0.030)",
     );
   });
 
@@ -90,9 +90,10 @@ describe("AI visibility buyer prompt MCP tools", () => {
           failed: ["perplexity"],
           skipped: [],
           costUsd: 0.014,
-          failedAttempts: 1,
+          retry: true,
         },
       ],
+      skipped: [{ promptId: "b", reason: "busy" }],
     });
     const args = z
       .object(runAiVisibilityPromptsTool.config.inputSchema)
@@ -108,6 +109,7 @@ describe("AI visibility buyer prompt MCP tools", () => {
       "2 answers stored, 0 already captured (free), 1 failed",
     );
     expect(textContent(result)).toContain("$0.0140");
+    expect(textContent(result)).toContain("1 prompt not run (busy)");
   });
 
   it("get_ai_visibility_prompt_results reads stored runs with the previous month and spends nothing", async () => {

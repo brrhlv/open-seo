@@ -1,24 +1,20 @@
 import { AI_VISIBILITY_PROMPT_PLATFORMS } from "@/db/ai-visibility.schema";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
 import { AiVisibilityRepository } from "@/server/features/ai-visibility/repositories/AiVisibilityRepository";
-import {
-  AiVisibilityPromptRepository,
-  type AiVisibilityPromptResultInsert,
-  type AiVisibilityPromptRow,
-} from "@/server/features/ai-visibility/repositories/AiVisibilityPromptRepository";
+import { AiVisibilityPromptRepository } from "@/server/features/ai-visibility/repositories/AiVisibilityPromptRepository";
 import {
   getPromptResults,
-  parsePlatforms,
   toPromptView,
   type PromptView,
 } from "@/server/features/ai-visibility/services/aiVisibilityPromptResults";
+import type { PromptPlatform } from "@/server/features/ai-visibility/services/promptAnswers";
 import {
-  analyzeAnswer,
-  NORMALIZERS,
-  type PromptPlatform,
-} from "@/server/features/ai-visibility/services/promptAnswers";
+  MONTHLY_PROMPT_COST_CAP_USD,
+  periodOf,
+  runPromptsGuarded,
+  type BrandContext,
+} from "@/server/features/ai-visibility/services/promptRuns";
 import { ProjectContextRepository } from "@/server/features/project-context/repositories/ProjectContextRepository";
-import { createDataforseoClient } from "@/server/lib/dataforseo";
 import { AppError } from "@/server/lib/errors";
 import { isHostedServerAuthMode } from "@/server/lib/runtime-env";
 import { detectTarget } from "@/shared/targetDetection";
@@ -33,40 +29,12 @@ import { detectTarget } from "@/shared/targetDetection";
 export const MAX_ACTIVE_PROMPTS = 10;
 const MIN_PROMPT_LENGTH = 3;
 const MAX_PROMPT_LENGTH = 300;
-// Same market as PAI-217; the prompts name the city themselves.
-const LOCATION_CODE = 2840;
-const LANGUAGE_CODE = "en";
-const PERPLEXITY_MODEL = "sonar";
-const PERPLEXITY_MAX_OUTPUT_TOKENS = 1024;
-// A failed platform retries after this delay, up to MAX_ATTEMPTS per month.
-export const RETRY_DELAY_MS = 6 * 60 * 60_000;
-export const MAX_ATTEMPTS_PER_PERIOD = 3;
 
-/** Per-prompt cost of one monthly run on all three platforms (observed 2026-11-02). */
-const ESTIMATED_PROMPT_COST_USD = {
-  chat_gpt: 0.004,
-  google_ai_mode: 0.004,
-  perplexity: 0.006,
-} as const satisfies Record<PromptPlatform, number>;
-
-export const ESTIMATED_PROMPT_RUN_COST_USD = Object.values(
-  ESTIMATED_PROMPT_COST_USD,
-).reduce((sum, usd) => sum + usd, 0);
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function periodOf(date: Date): string {
-  return date.toISOString().slice(0, 7);
-}
-
-/** 06:00 UTC on the 1st of the month after `now` (the PAI-217 anchor). */
-export function nextMonthlyRunAt(now: Date): string {
-  return new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 6, 0, 0),
-  ).toISOString();
-}
+// Re-exported for the MCP tools and the cron.
+export {
+  ESTIMATED_PROMPT_RUN_COST_USD,
+  MONTHLY_PROMPT_COST_CAP_USD,
+} from "@/server/features/ai-visibility/services/promptRuns";
 
 function normalizePromptText(raw: string): string {
   return raw.trim().replace(/\s+/g, " ");
@@ -197,11 +165,6 @@ async function removePrompts(projectId: string, promptIds: string[]) {
 // Run
 // ---------------------------------------------------------------------------
 
-type BrandContext = {
-  target: { domain: string | null; names: string[] };
-  competitors: { domain: string; name: string | null }[];
-};
-
 async function loadBrandContext(
   projectId: string,
   projectDomain: string | null,
@@ -227,35 +190,6 @@ async function loadBrandContext(
   };
 }
 
-async function fetchAnswer(
-  platform: PromptPlatform,
-  prompt: string,
-  billingCustomer: BillingCustomerContext,
-  onCost: (usd: number) => void,
-): Promise<unknown> {
-  const client = createDataforseoClient(billingCustomer, { onCost });
-  const market = {
-    prompt,
-    locationCode: LOCATION_CODE,
-    languageCode: LANGUAGE_CODE,
-  };
-  switch (platform) {
-    case "chat_gpt":
-      return client.aiSearch.chatGptScraper(market);
-    case "google_ai_mode":
-      return client.aiSearch.googleAiMode(market);
-    case "perplexity":
-      return client.aiSearch.llmResponse({
-        userPrompt: prompt,
-        modelSlug: "perplexity",
-        modelName: PERPLEXITY_MODEL,
-        webSearch: true,
-        webSearchCountryCode: "US",
-        maxOutputTokens: PERPLEXITY_MAX_OUTPUT_TOKENS,
-      });
-  }
-}
-
 /** Same gate as PAI-217: hosted free plans cannot spend on AI visibility. */
 async function assertHostedPaidPlan(organizationId: string): Promise<void> {
   if (!(await isHostedServerAuthMode())) return;
@@ -267,144 +201,11 @@ async function assertHostedPaidPlan(organizationId: string): Promise<void> {
   );
 }
 
-type PromptRunOutcome = {
-  promptId: string;
-  ran: PromptPlatform[];
-  failed: PromptPlatform[];
-  skipped: PromptPlatform[];
-  costUsd: number;
-  /** Lowest attempt count among failed platforms this period (for retry). */
-  failedAttempts: number;
-};
-
 /**
- * Ask one prompt on its platforms, concurrently. Platforms that already have
- * an ok row this period are skipped unless `force`. A failure never
- * overwrites an ok row from earlier in the month; it only adds its cost.
+ * "Run now" (MCP): every active prompt, or the given ones, through the same
+ * guards as the cron (lease, attempts, monthly prompt limit, spend cap), two
+ * at a time. Refuses outright when this month's spend is already at the cap.
  */
-async function runPrompt(input: {
-  prompt: AiVisibilityPromptRow;
-  brands: BrandContext;
-  billingCustomer: BillingCustomerContext;
-  period: string;
-  now: Date;
-  force?: boolean;
-}): Promise<PromptRunOutcome> {
-  const { prompt, period, now } = input;
-  const platforms = parsePlatforms(prompt.platformsJson);
-  const existing = await AiVisibilityPromptRepository.listResultsForPeriod(
-    [prompt.id],
-    period,
-  );
-  const existingBy = new Map(existing.map((row) => [row.platform, row]));
-  const todo = platforms.filter(
-    (p) => input.force || existingBy.get(p)?.status !== "ok",
-  );
-  const skipped = platforms.filter((p) => !todo.includes(p));
-
-  const settled = await Promise.all(
-    todo.map(async (platform) => {
-      let costUsd = 0;
-      try {
-        const raw = await fetchAnswer(
-          platform,
-          prompt.prompt,
-          input.billingCustomer,
-          (usd) => (costUsd += usd),
-        );
-        const answer = NORMALIZERS[platform](raw);
-        return {
-          platform,
-          costUsd,
-          ok: true as const,
-          model: answer.model,
-          analysis: analyzeAnswer(answer, input.brands),
-        };
-      } catch (error) {
-        console.error(
-          `[ai-visibility] prompt ${prompt.id} failed on ${platform}:`,
-          error,
-        );
-        return {
-          platform,
-          costUsd,
-          ok: false as const,
-          error: error instanceof Error ? error.message : String(error),
-        };
-      }
-    }),
-  );
-
-  const capturedAt = now.toISOString();
-  const rows: AiVisibilityPromptResultInsert[] = settled.map((r) => {
-    const base = {
-      promptId: prompt.id,
-      platform: r.platform,
-      period,
-      costUsd: r.costUsd,
-      capturedAt,
-    };
-    if (r.ok) {
-      return {
-        ...base,
-        status: "ok" as const,
-        mentioned: r.analysis.mentioned,
-        position: r.analysis.position,
-        brandsNamed: r.analysis.brandsNamed,
-        citedUrl: r.analysis.citedUrl,
-        citedUrlsJson: JSON.stringify(r.analysis.citedUrls),
-        competitorsJson: JSON.stringify(r.analysis.competitors),
-        excerpt: r.analysis.excerpt,
-        model: r.model,
-        error: null,
-      };
-    }
-    const kept = existingBy.get(r.platform);
-    if (kept?.status === "ok") {
-      // Keep the month's good answer; the re-run's cost still accumulates.
-      const { id: _id, attempts: _attempts, ...values } = kept;
-      return { ...values, costUsd: r.costUsd, capturedAt: kept.capturedAt };
-    }
-    return {
-      ...base,
-      status: "error" as const,
-      mentioned: null,
-      position: null,
-      brandsNamed: null,
-      citedUrl: null,
-      citedUrlsJson: "[]",
-      competitorsJson: "[]",
-      excerpt: null,
-      model: null,
-      error: r.error,
-    };
-  });
-  await AiVisibilityPromptRepository.upsertResults(rows);
-
-  const failed = settled.filter((r) => !r.ok).map((r) => r.platform);
-  const errors = settled.flatMap((r) => (r.ok ? [] : [r.error]));
-  await AiVisibilityPromptRepository.updatePrompt(prompt.id, {
-    lastRunAt: capturedAt,
-    lastError:
-      errors.length > 0 ? `${failed.join(", ")}: ${errors.join("; ")}` : null,
-  });
-
-  return {
-    promptId: prompt.id,
-    ran: settled.filter((r) => r.ok).map((r) => r.platform),
-    failed,
-    skipped,
-    costUsd: settled.reduce((sum, r) => sum + r.costUsd, 0),
-    failedAttempts:
-      failed.length === 0
-        ? 0
-        : Math.min(
-            ...failed.map((p) => (existingBy.get(p)?.attempts ?? 0) + 1),
-          ),
-  };
-}
-
-/** "Run now" (MCP): every active prompt, or the given ones, at most 10. */
 async function runPrompts(input: {
   projectId: string;
   projectDomain: string | null;
@@ -414,7 +215,6 @@ async function runPrompts(input: {
   now?: Date;
 }) {
   const now = input.now ?? new Date();
-  const period = periodOf(now);
   const brands = await loadBrandContext(input.projectId, input.projectDomain);
   const active = await AiVisibilityPromptRepository.listPrompts(
     input.projectId,
@@ -427,31 +227,25 @@ async function runPrompts(input: {
       "No active buyer prompts matched. Add some with add_ai_visibility_prompts.",
     );
   }
-  if (prompts.length > MAX_ACTIVE_PROMPTS) {
+  const spent = await AiVisibilityPromptRepository.sumProjectCostForPeriod(
+    input.projectId,
+    periodOf(now),
+  );
+  if (spent >= MONTHLY_PROMPT_COST_CAP_USD) {
     throw new AppError(
       "VALIDATION_ERROR",
-      `Run at most ${MAX_ACTIVE_PROMPTS} prompts at a time`,
+      `Buyer prompts already cost $${spent.toFixed(2)} this month, at the $${MONTHLY_PROMPT_COST_CAP_USD.toFixed(2)} monthly cap. They run again next month.`,
     );
   }
   await assertHostedPaidPlan(input.billingCustomer.organizationId);
-
-  const outcomes = await Promise.all(
-    prompts.map((prompt) =>
-      runPrompt({
-        prompt,
-        brands,
-        billingCustomer: input.billingCustomer,
-        period,
-        now,
-        force: input.force,
-      }),
-    ),
-  );
-  return {
-    period,
-    costUsd: outcomes.reduce((sum, o) => sum + o.costUsd, 0),
-    outcomes,
-  };
+  return runPromptsGuarded({
+    projectId: input.projectId,
+    prompts,
+    brands,
+    billingCustomer: input.billingCustomer,
+    now,
+    force: input.force,
+  });
 }
 
 export const AiVisibilityPromptService = {
@@ -459,7 +253,6 @@ export const AiVisibilityPromptService = {
   addPrompts,
   removePrompts,
   loadBrandContext,
-  runPrompt,
   runPrompts,
   getResults: getPromptResults,
 };

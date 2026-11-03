@@ -130,6 +130,17 @@ async function resultRows() {
   return result.rows;
 }
 
+const PROMPT = "best photo booth company for a corporate event in Las Vegas";
+
+async function addOne(): Promise<string> {
+  const added = await service().addPrompts({
+    projectId: PROJECT,
+    prompts: [PROMPT],
+    now: NOV,
+  });
+  return added.prompts[0]?.id ?? "";
+}
+
 const run = (now: Date, extra: { force?: boolean } = {}) =>
   service().runPrompts({
     projectId: PROJECT,
@@ -220,7 +231,7 @@ describe("AiVisibilityPromptService runs", () => {
     const first = await run(NOV);
     expect(first.outcomes[0]).toMatchObject({
       failed: ["perplexity"],
-      failedAttempts: 1,
+      retry: true,
     });
 
     const second = await run(NOV);
@@ -240,6 +251,113 @@ describe("AiVisibilityPromptService runs", () => {
       error: null,
     });
     expect(Number(chatGpt?.cost_usd)).toBeCloseTo(0.008);
+  });
+
+  it("records a timed-out ChatGPT call at its estimated cost (DataForSEO still bills it)", async () => {
+    await addOne();
+    const timeout = Object.assign(new Error("DataForSEO request timed out"), {
+      name: "DataForSEOTimeoutError",
+    });
+    mocks.aiSearch.chatGptScraper.mockImplementationOnce(async () => {
+      throw timeout;
+    });
+    await run(NOV);
+    const chatGpt = (await resultRows()).find((r) => r.platform === "chat_gpt");
+    expect(chatGpt).toMatchObject({ status: "error", attempts: 1 });
+    expect(Number(chatGpt?.cost_usd)).toBeCloseTo(0.004);
+  });
+
+  it("stops at 3 attempts per platform a month, force and re-adding included", async () => {
+    const id = await addOne();
+    await run(NOV);
+    await run(NOV, { force: true });
+    await run(NOV, { force: true });
+    await service().removePrompts(PROJECT, [id]);
+    await service().addPrompts({
+      projectId: PROJECT,
+      prompts: [PROMPT],
+      now: NOV,
+    });
+    const fourth = await run(NOV, { force: true });
+    expect(fourth.outcomes[0]).toMatchObject({
+      ran: [],
+      skipped: ["chat_gpt", "google_ai_mode", "perplexity"],
+      costUsd: 0,
+    });
+    expect(mocks.aiSearch.chatGptScraper).toHaveBeenCalledTimes(3);
+  });
+
+  it("concurrent run-now calls run a prompt once (the second finds it leased)", async () => {
+    await addOne();
+    const [a, b] = await Promise.all([run(NOV), run(NOV)]);
+    expect(mocks.aiSearch.chatGptScraper).toHaveBeenCalledOnce();
+    expect([...a.skipped, ...b.skipped]).toEqual([
+      expect.objectContaining({ reason: "busy" }),
+    ]);
+  });
+
+  it("runs at most two prompts at a time", async () => {
+    await service().addPrompts({
+      projectId: PROJECT,
+      prompts: [
+        "one prompt",
+        "two prompt",
+        "three prompt",
+        "four prompt",
+        "five prompt",
+      ],
+      now: NOV,
+    });
+    let inFlight = 0;
+    let peak = 0;
+    mocks.aiSearch.chatGptScraper.mockImplementation(async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight--;
+      return FIXTURES.chat_gpt_1;
+    });
+    const result = await run(NOV);
+    expect(result.outcomes).toHaveLength(5);
+    expect(peak).toBe(2);
+  });
+
+  it("refuses once this month's spend reaches the $1.00 cap", async () => {
+    await addOne();
+    await run(NOV);
+    await client.execute(
+      "UPDATE ai_visibility_prompt_results SET cost_usd = 0.5",
+    );
+    await expect(run(NOV, { force: true })).rejects.toThrow(/monthly cap/);
+  });
+
+  it("removing and adding can't run more than 10 prompts in a month", async () => {
+    const ten = Array.from({ length: 10 }, (_, i) => `prompt number ${i}`);
+    const added = await service().addPrompts({
+      projectId: PROJECT,
+      prompts: ten,
+      now: NOV,
+    });
+    await run(NOV);
+    await service().removePrompts(
+      PROJECT,
+      added.prompts.map((p) => p.id),
+    );
+    await service().addPrompts({
+      projectId: PROJECT,
+      prompts: ["prompt eleven"],
+      now: NOV,
+    });
+    const calls = mocks.aiSearch.chatGptScraper.mock.calls.length;
+    const result = await run(NOV);
+    expect(result.skipped).toEqual([
+      expect.objectContaining({ reason: "monthly_prompt_limit" }),
+    ]);
+    expect(mocks.aiSearch.chatGptScraper.mock.calls.length).toBe(calls);
+    const row = await client.execute(
+      "SELECT next_run_at FROM ai_visibility_prompts WHERE prompt = 'prompt eleven'",
+    );
+    expect(row.rows[0]?.next_run_at).toBe("2026-12-01T06:00:00.000Z");
   });
 
   it("refuses without an AI visibility tracker", async () => {
