@@ -9,9 +9,10 @@ import { toIsoTimestamp } from "../timestamps";
  */
 export async function getAiVisibilityPromptsSection(projectId: string) {
   try {
-    const { lastRunAt, nextRunAt, items } =
+    const { schedule, lastRunAt, nextRunAt, items } =
       await AiVisibilityPromptService.getResults(projectId);
     return {
+      schedule,
       lastRunAt: toIsoTimestamp(lastRunAt),
       nextRunAt: toIsoTimestamp(nextRunAt),
       items: items.map((item) => ({

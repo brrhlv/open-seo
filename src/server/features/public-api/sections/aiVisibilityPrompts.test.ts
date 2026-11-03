@@ -22,6 +22,7 @@ const run = {
 describe("aiVisibility.prompts summary section", () => {
   it("returns each prompt's latest and previous run per platform with ISO timestamps", async () => {
     mocks.getResults.mockResolvedValue({
+      schedule: "monthly",
       lastRunAt: "2026-11-03 07:30:00",
       nextRunAt: "2026-12-01T06:00:00.000Z",
       items: [
@@ -46,6 +47,7 @@ describe("aiVisibility.prompts summary section", () => {
     });
 
     expect(await getAiVisibilityPromptsSection("p1")).toEqual({
+      schedule: "monthly",
       lastRunAt: "2026-11-03T07:30:00.000Z",
       nextRunAt: "2026-12-01T06:00:00.000Z",
       items: [

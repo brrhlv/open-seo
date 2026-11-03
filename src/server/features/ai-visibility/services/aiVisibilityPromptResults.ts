@@ -1,6 +1,7 @@
 import { sort } from "remeda";
 import { z } from "zod";
 import { AI_VISIBILITY_PROMPT_PLATFORMS } from "@/db/ai-visibility.schema";
+import { AiVisibilityRepository } from "@/server/features/ai-visibility/repositories/AiVisibilityRepository";
 import {
   AiVisibilityPromptRepository,
   type AiVisibilityPromptResultRow,
@@ -110,8 +111,22 @@ function toRunView(row: AiVisibilityPromptResultRow): PromptRunView {
 }
 
 /** Active prompts with, per platform, the latest run and the one before it. */
+/**
+ * Whether the cron will run the prompts: only for an active monthly tracker.
+ * "none" = no AI visibility tracker for the project.
+ */
+type PromptSchedule = "monthly" | "manual" | "paused" | "none";
+
 export async function getPromptResults(projectId: string) {
-  const prompts = await AiVisibilityPromptRepository.listPrompts(projectId);
+  const [prompts, config] = await Promise.all([
+    AiVisibilityPromptRepository.listPrompts(projectId),
+    AiVisibilityRepository.getConfigForProject(projectId),
+  ]);
+  const schedule: PromptSchedule = !config
+    ? "none"
+    : !config.isActive
+      ? "paused"
+      : config.scheduleInterval;
   const rows = await AiVisibilityPromptRepository.listRecentResults(
     prompts.map((p) => p.id),
     prompts.length *
@@ -166,6 +181,7 @@ export async function getPromptResults(projectId: string) {
     (a, b) => a.localeCompare(b),
   );
   return {
+    schedule,
     lastRunAt: captured.at(-1) ?? null,
     nextRunAt: nextRuns[0] ?? null,
     items,

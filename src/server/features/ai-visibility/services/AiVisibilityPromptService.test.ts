@@ -378,6 +378,7 @@ describe("AiVisibilityPromptService.getResults", () => {
     await run(DEC);
 
     const results = await service().getResults(PROJECT);
+    expect(results.schedule).toBe("monthly");
     expect(results.lastRunAt).toBe(DEC.toISOString());
     const chatGpt = results.items[0]?.results.find(
       (r) => r.platform === "chat_gpt",

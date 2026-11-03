@@ -67,9 +67,15 @@ vi.mock("@/server/features/ga4/services/Ga4OrganicOverviewService", () => ({
   },
 }));
 // PAI-255: the buyer-prompts key has its own test (sections/).
-const NO_PROMPTS = { lastRunAt: null, nextRunAt: null, items: [] };
+const NO_PROMPTS = {
+  schedule: "none",
+  lastRunAt: null,
+  nextRunAt: null,
+  items: [],
+};
 vi.mock("./sections/aiVisibilityPrompts", () => ({
   getAiVisibilityPromptsSection: async () => ({
+    schedule: "none",
     lastRunAt: null,
     nextRunAt: null,
     items: [],
