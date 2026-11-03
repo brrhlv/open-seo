@@ -9,6 +9,7 @@ import { SamSessionRepository } from "@/server/features/sam/SamSessionRepository
 import { runScheduledRankChecks } from "@/server/features/rank-tracking/services/scheduledRankChecks";
 import { runScheduledAiVisibilityChecks } from "@/server/features/ai-visibility/services/scheduledAiVisibilityChecks";
 import { runScheduledIndexInspections } from "@/server/features/gsc/services/scheduledIndexInspections";
+import { runScheduledLocalGridChecks } from "@/server/features/local-grid/services/scheduledLocalGridChecks";
 import { reconcileStaleAudits } from "@/server/features/audit/services/auditReconciler";
 import { getOrCreateOrganizationCustomer } from "@/server/billing/subscription";
 import { isHostedServerAuthMode } from "@/server/lib/runtime-env";
@@ -253,6 +254,13 @@ export default {
       await withPgClient(() => runScheduledIndexInspections());
     } catch (err) {
       console.error("[cron] Index inspections failed:", err);
+    }
+    // CLIENT-SBLV-191: monthly Maps rank grid, gated by next_check_at (the 2nd,
+    // 07:00 UTC), one keyword per tick. Last, so it can't delay the others.
+    try {
+      await withPgClient(() => runScheduledLocalGridChecks());
+    } catch (err) {
+      console.error("[cron] Local grid checks failed:", err);
     }
     if (watchdogError) throw watchdogError;
   },

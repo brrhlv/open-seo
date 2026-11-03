@@ -114,6 +114,16 @@ vi.mock("./sections/ga4KeyEvents", () => ({
   getGa4KeyEventsSection: mocks.getGa4KeyEventsSection,
 }));
 
+// CLIENT-SBLV-191: the section's own shaping is tested in localGridSummary.test.ts.
+const gridMocks = vi.hoisted(() => ({ getLocalGridSection: vi.fn() }));
+vi.mock("./sections/localGrid", () => ({
+  getLocalGridSection: gridMocks.getLocalGridSection,
+}));
+const UNTRACKED_GRID = { tracked: false, keywords: [] };
+beforeEach(() => {
+  gridMocks.getLocalGridSection.mockResolvedValue(UNTRACKED_GRID);
+});
+
 /** Stored share_of_voice_json for a target-only leaderboard. */
 function sovJson(targetPct: number) {
   return JSON.stringify({
@@ -214,6 +224,16 @@ describe("PublicSummaryService.getSummary", () => {
       opportunities: { connected: false },
       auditPages: { status: "none" },
       indexStatus: { connected: false },
+      localGrid: UNTRACKED_GRID,
+    });
+  });
+
+  it("isolates a failing localGrid read like any other section", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    gridMocks.getLocalGridSection.mockRejectedValue(new Error("d1 down"));
+    expect(await PublicSummaryService.getSummary(input)).toMatchObject({
+      localGrid: { error: "internal_error" },
+      audit: { status: "none" },
     });
   });
 
@@ -253,6 +273,7 @@ describe("PublicSummaryService.getSummary", () => {
       "opportunities",
       "auditPages",
       "indexStatus",
+      "localGrid",
     ]);
     expect(Object.keys(summary?.ga4 ?? {})).toEqual([
       "connected",

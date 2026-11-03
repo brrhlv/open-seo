@@ -27,6 +27,7 @@ import {
   type PublicSummaryRange,
 } from "./publicSummaryRange";
 import { getSavedKeywordsSection } from "./sections/savedKeywords";
+import { getLocalGridSection } from "./sections/localGrid";
 import { toIsoTimestamp } from "./timestamps";
 // CLIENT-SBLV-194: summary v2 sections, one module each.
 import { getAuditPagesSection } from "./sections/auditPages";
@@ -388,6 +389,10 @@ async function getSummary(input: {
   const { project } = found;
   const now = input.now ?? new Date();
   const dates = resolvePublicSummaryDates(input.range, now);
+  // CLIENT-SBLV-191, started before the others so it runs alongside them.
+  const localGridPending = Promise.allSettled([
+    getLocalGridSection(project.id),
+  ]);
 
   // Started first so they run beside the sections below, not after them.
   const v2Sections = Promise.allSettled([
@@ -421,6 +426,7 @@ async function getSummary(input: {
     opportunities: unwrap("opportunities", project.id, opportunities),
     auditPages: unwrap("auditPages", project.id, auditPages),
     indexStatus: unwrap("indexStatus", project.id, indexStatus),
+    localGrid: unwrap("localGrid", project.id, (await localGridPending)[0]),
   };
 }
 
