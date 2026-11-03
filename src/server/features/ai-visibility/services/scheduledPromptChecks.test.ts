@@ -165,6 +165,41 @@ describe("buyer prompt phase of the AI visibility cron", () => {
     expect(mocks.chatGptScraper).toHaveBeenCalledOnce();
   });
 
+  it("waits for the next tick when the rank loop used most of this one", async () => {
+    await Scheduler.runScheduledAiVisibilityChecks(NOW, Date.now() - 61_000);
+    expect(mocks.chatGptScraper).not.toHaveBeenCalled();
+    expect(await prompt()).toMatchObject({ next_run_at: DUE });
+  });
+
+  it("a run that throws counts as an attempt on every open platform", async () => {
+    // The results table rejects writes: the whole run throws inside the lease.
+    await client.execute(
+      "CREATE TRIGGER no_results BEFORE INSERT ON ai_visibility_prompt_results WHEN NEW.status = 'ok' BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    );
+    try {
+      await Scheduler.runScheduledAiVisibilityChecks(NOW);
+      await Scheduler.runScheduledAiVisibilityChecks(
+        new Date("2026-12-01T12:40:00.000Z"),
+      );
+      await Scheduler.runScheduledAiVisibilityChecks(
+        new Date("2026-12-01T18:40:00.000Z"),
+      );
+      const rows = await client.execute(
+        "SELECT platform, status, attempts FROM ai_visibility_prompt_results ORDER BY platform",
+      );
+      expect(rows.rows.map((r) => [r.status, r.attempts])).toEqual([
+        ["error", 3],
+        ["error", 3],
+        ["error", 3],
+      ]);
+      expect(await prompt()).toMatchObject({
+        next_run_at: "2027-01-01T06:00:00.000Z",
+      });
+    } finally {
+      await client.execute("DROP TRIGGER no_results");
+    }
+  });
+
   it("skips projects whose tracker is manual or paused", async () => {
     await client.execute(
       "UPDATE ai_visibility_configs SET schedule_interval = 'manual'",

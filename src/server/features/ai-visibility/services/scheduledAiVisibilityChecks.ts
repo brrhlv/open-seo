@@ -22,7 +22,12 @@ const RETRY_DELAY_MS = 6 * 60 * 60_000;
  * Runs beside runScheduledRankChecks on the `*\/5` trigger. Self-hosted only
  * in practice; hosted mode is metered by getBrandLookup like any lookup.
  */
-export async function runScheduledAiVisibilityChecks(now = new Date()) {
+export async function runScheduledAiVisibilityChecks(
+  now = new Date(),
+  // PAI-255: when the cron handler started, so the prompt phase can tell
+  // how much of the tick the rank loop already used.
+  tickStartedAtMs = Date.now(),
+) {
   const deadline = Date.now() + TICK_DEADLINE_MS;
   const due = await AiVisibilityRepository.getDueConfigsWithOrganization(
     now.toISOString(),
@@ -87,7 +92,7 @@ export async function runScheduledAiVisibilityChecks(now = new Date()) {
   }
 
   // PAI-255: buyer prompts run only on ticks with no tracker due.
-  if (due.length === 0) return runScheduledPromptChecks(now);
+  if (due.length === 0) return runScheduledPromptChecks(now, tickStartedAtMs);
   (errors > 0 ? console.error : console.log)({
     event: "ai_visibility_scheduler_summary",
     candidates: due.length,
