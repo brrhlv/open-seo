@@ -111,7 +111,10 @@ function hostMatches(host: string, domain: string): boolean {
 
 /** "socialboothlv.com" → "socialboothlv"; "foo.co.uk" → "foo". */
 export function domainStem(domain: string): string {
-  const labels = domain.toLowerCase().replace(/^www\./, "").split(".");
+  const labels = domain
+    .toLowerCase()
+    .replace(/^www\./, "")
+    .split(".");
   if (labels.length <= 1) return compactName(labels[0] ?? "");
   const last = labels.at(-1) ?? "";
   const secondLast = labels.at(-2) ?? "";
