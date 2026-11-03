@@ -16,7 +16,7 @@ PAI-217 tracks LLM Mentions, DataForSEO's dataset of prompts that already mentio
 6. Scheduler: a prompt phase inside `runScheduledAiVisibilityChecks`. No new cron expression.
 7. MCP: five tools.
 8. Public summary: `aiVisibility.prompts`, built in `public-api/sections/aiVisibilityPrompts.ts`.
-9. Seed SQL for the 8 SBLV prompts in `scripts/seeds/`. It is not run.
+9. Seed SQL for the 8 SBLV prompts, `scripts/seed-sblv-buyer-prompts.sql`. It is not run.
 
 ## Endpoints chosen (cheapest reliable per platform)
 
@@ -243,7 +243,7 @@ Out of scope here. The admin is the consumer. `AvailableTools.tsx` lists the fiv
 
 1. The coordinator merges the branch (migration last; renumber if needed) and deploys with the chained alchemy command from `reference_openseo_setup.md`.
 2. Apply the D1 migration `0046_ai_visibility_prompts.sql`.
-3. Seed SBLV: review `scripts/seeds/PAI-255-sblv-buyer-prompts.sql`, then run it through the D1 API. It inserts 8 prompts with `next_run_at = now`. Alternatively, call `add_ai_visibility_prompts` with the same 8 prompts.
+3. Seed SBLV: review `scripts/seed-sblv-buyer-prompts.sql`, then run it through the D1 API. It inserts 8 prompts with `next_run_at = now`. Alternatively, call `add_ai_visibility_prompts` with the same 8 prompts.
 4. First run: the `*/5` cron baselines them within about 20 minutes (4 ticks). Or call `run_ai_visibility_prompts` for an immediate run of about $0.11.
 5. Verify `GET /api/public/v1/projects/c65ed7c9-…/summary` returns `aiVisibility.prompts.items` with 8 entries and up to 3 results each. Log `SUM(cost_usd)` in PAI-255.
 6. Monthly from 2026-12-01 06:00 UTC, after the mentions phase drains.
