@@ -12,7 +12,7 @@ Built on the PAI-217 model (AI visibility): a config table, a snapshots table, a
 ## Live findings from the fixture pull (2026-11-03 07:20 UTC, $0.0138)
 
 - Profile (`my_business_info/live`, `cid:5590594803775798319`): primary **Photo booth**; additional **Balloon artist, Event management company, Event planner, Party equipment rental service**; website `https://socialboothlv.com/`; hours 09:00 to 21:00 every day; 5.0 from 113 reviews; claimed; 115 photos.
-- **Drift on day one:** "Party equipment rental service" is still an additional category. Bryan's accepted state (2026-11-02) says no party-rental category. The first snapshot will report it.
+- **No drift on day one:** every live category is in the accepted state (Bryan accepted "Party equipment rental service" as a secondary on 2026-11-03), so the first snapshot reports no drift.
 - Q&A (`questions_and_answers/live`): status 40102 "No Search Results", still billed $0.0054. Google retired the Q&A module on Maps in late 2025, so this is expected to stay empty. **Not collected** (Bryan, 2026-11-03): the watch makes no Q&A call, since it is billed and always empty.
 - Reviews (`reviews/task_post`, depth 20, high priority): settled within 6 s. Newest review 2026-10-29; 3 of the newest 5 have no owner reply.
 - Owner updates were not pulled (the ticket's paid allowance covered profile, reviews and Q&A); the fixture follows the documented `my_business_updates` item shape.
@@ -43,8 +43,8 @@ Indexes: unique `(project_id)`, `(is_active, next_check_at)` for the due query. 
 ```json
 {
   "primaryCategory": "Photo booth",
-  "allowedAdditionalCategories": ["Balloon artist", "Event management company", "Event planner"],
-  "forbiddenCategories": ["Wedding service", "Wedding photographer", "Photographer", "Photography service", "Party equipment rental service"],
+  "allowedAdditionalCategories": ["Balloon artist", "Event management company", "Event planner", "Party equipment rental service"],
+  "forbiddenCategories": ["Wedding service", "Wedding photographer", "Photographer", "Photography service"],
   "website": "https://socialboothlv.com/",
   "hours": { "monday": ["09:00-21:00"], "tuesday": ["09:00-21:00"], "wednesday": ["09:00-21:00"], "thursday": ["09:00-21:00"], "friday": ["09:00-21:00"], "saturday": ["09:00-21:00"], "sunday": ["09:00-21:00"] }
 }
@@ -203,9 +203,7 @@ Example (SBLV after the first run, trimmed):
   "newReviewCount": 0,
   "ownerUpdates": { "latestPostedAt": null, "newCount": 0, "recent": [] },
   "changes": [],
-  "driftFromExpected": [
-    { "field": "additionalCategories", "rule": "forbidden_category", "expected": "Not listed", "actual": "Party equipment rental service", "since": "2026-11-09T14:00:41.000Z" }
-  ]
+  "driftFromExpected": []
 }
 ```
 
@@ -222,7 +220,7 @@ Untracked project: `{ "tracked": false, "placeId": null, "cid": null, "listingId
 
 ## Test plan
 
-- `gbpWatchModel.test.ts` (pure, fixtures from the live pull in `__fixtures__/sblv-*.json`): profile normalization (categories, hours map, website, rating); `hoursText` grouping; drift: forbidden category found in the live fixture, unexpected category, primary mismatch, website scheme change, hours change, case-insensitive match, `since` walks back the unbroken run; `changes` for categories, hours and website; reviews `isNew` against the previous list and the null-gap case; first snapshot has no changes and nothing new.
+- `gbpWatchModel.test.ts` (pure, fixtures from the live pull in `__fixtures__/sblv-*.json`): profile normalization (categories, hours map, website, rating); `hoursText` grouping; drift: none on the live fixture against SBLV's seed, a forbidden category, unexpected category, primary mismatch, website scheme change, hours change, case-insensitive match, `since` walks back the unbroken run; `changes` for categories, hours and website; reviews `isNew` against the previous list and the null-gap case; first snapshot has no changes and nothing new.
 - `GbpWatchService.test.ts` (in-memory SQLite from the shipped migration, DataForSEO mocked like `AiVisibilityService.test.ts`): run stores one row with the summed cost; one-hour guard skips DataForSEO; a reviews task that never settles stores `reviews_json = null` and the run succeeds; a failed profile stores nothing and sets `last_error`; the second run diffs against the first.
 - `scheduledGbpSnapshots.test.ts`: one due config per tick, claim moves `next_check_at` to the next Monday 14:00 UTC, failure sets `last_error` and retries in 6 h.
 - `gbp-watch-tools.test.ts`: `get_gbp_watch` spends nothing; `run_gbp_snapshot` description carries the cost; `set_gbp_watch` rejects a config with neither cid nor placeId.
@@ -234,7 +232,7 @@ Untracked project: `{ "tracked": false, "placeId": null, "cid": null, "listingId
 1. Merge after the other wave branches; regenerate the migration if `0046` / `0024` collide.
 2. Deploy (chained alchemy form in `reference_openseo_setup.md`), then apply `drizzle/0046_gbp_watch.sql` to D1 `3c6f2f61-8748-4944-b900-2f857b02059b`.
 3. Create the SBLV watch: MCP `set_gbp_watch` with the SBLV identifiers and the `expected` JSON above, or the D1 insert in the appendix.
-4. First run: MCP `run_gbp_snapshot` for SBLV (about $0.009), or set `next_check_at` to now and let the `*/5` tick take it. Check `get_gbp_watch` shows the party-rental drift.
+4. First run: MCP `run_gbp_snapshot` for SBLV (about $0.009), or set `next_check_at` to now and let the `*/5` tick take it. Check `get_gbp_watch` shows the profile and no drift.
 5. Then deploy the admin branch. Its card and alert read `gbp` when present and say "not available yet" when absent, so the order between the two deploys is not critical.
 
 ## Appendix: D1 insert for step 3
@@ -242,11 +240,11 @@ Untracked project: `{ "tracked": false, "placeId": null, "cid": null, "listingId
 ```sql
 INSERT INTO gbp_configs (id, project_id, place_id, cid, listing_id, expected_json, schedule_interval, is_active, next_check_at)
 VALUES (lower(hex(randomblob(16))), 'c65ed7c9-ee05-4b6d-a61f-8817c7a003ae', 'ChIJuy0JGkfryIARL3wzklrIlU0', '5590594803775798319', '14154039352732233380',
-  '{"primaryCategory":"Photo booth","allowedAdditionalCategories":["Balloon artist","Event management company","Event planner"],"forbiddenCategories":["Wedding service","Wedding photographer","Photographer","Photography service","Party equipment rental service"],"website":"https://socialboothlv.com/","hours":{"monday":["09:00-21:00"],"tuesday":["09:00-21:00"],"wednesday":["09:00-21:00"],"thursday":["09:00-21:00"],"friday":["09:00-21:00"],"saturday":["09:00-21:00"],"sunday":["09:00-21:00"]}}', 'weekly', 1, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
+  '{"primaryCategory":"Photo booth","allowedAdditionalCategories":["Balloon artist","Event management company","Event planner","Party equipment rental service"],"forbiddenCategories":["Wedding service","Wedding photographer","Photographer","Photography service"],"website":"https://socialboothlv.com/","hours":{"monday":["09:00-21:00"],"tuesday":["09:00-21:00"],"wednesday":["09:00-21:00"],"thursday":["09:00-21:00"],"friday":["09:00-21:00"],"saturday":["09:00-21:00"],"sunday":["09:00-21:00"]}}', 'weekly', 1, strftime('%Y-%m-%dT%H:%M:%fZ','now'));
 ```
 
 ## Decisions (Bryan)
 
-1. **"Party equipment rental service" on the SBLV profile: open.** It is live today and conflicts with the accepted state, so the admin shows the drift alert until it is removed or accepted. Leave the alert as is.
-2. Balloon artist and Event planner are accepted secondaries (2026-11-03): they are in the seed's `allowedAdditionalCategories`, so with the live profile the only drift is party rental.
+1. Accepted secondaries for SBLV (2026-11-03): Balloon artist, Event management company, Event planner and Party equipment rental service. All four are in the seed's `allowedAdditionalCategories`, so the live profile has no drift. Wedding and photographer categories stay forbidden.
+2. Photo booth stays the primary.
 3. Q&A dropped (2026-11-03): Google retired it, DataForSEO still bills it.
