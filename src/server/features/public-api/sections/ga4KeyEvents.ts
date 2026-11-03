@@ -1,5 +1,6 @@
 import { sortBy } from "remeda";
 import { Ga4ReportingService } from "@/server/features/ga4/services/Ga4ReportingService";
+import { isExcludedPath } from "./excludedPaths";
 
 // CLIENT-SBLV-194: key events for the summary range. Per event across ALL
 // channels with the previous period (broken tracking silences every channel,
@@ -23,7 +24,10 @@ const text = (value: unknown): string =>
  *  key across reports, so www and bare-host visits to a page are one row. */
 function pageKey(row: Ga4Row): string | null {
   const landing = text(row.landingPage);
-  if (!landing || landing === "(not set)") return null;
+  // Admin, API and sign-in routes are never landing pages (CLIENT-SBLV-197).
+  if (!landing || landing === "(not set)" || isExcludedPath(landing)) {
+    return null;
+  }
   const path = landing.split("?")[0] ?? "";
   const trimmed = path.length > 1 ? path.replace(/\/+$/, "") : path;
   const host = text(row.hostName)
@@ -72,6 +76,7 @@ export async function getGa4KeyEventsSection(
 
   const organicByEvent = new Map<string, number>();
   for (const row of byEventAndPage.rows) {
+    if (!pageKey(row)) continue;
     const name = text(row.eventName);
     organicByEvent.set(
       name,
