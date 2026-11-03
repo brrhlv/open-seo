@@ -137,7 +137,12 @@ export async function handleHeadlessMcpRequest(
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
-  if (!team?.ok || !audience || keys.length === 0) {
+  if (
+    !team?.ok ||
+    !audience ||
+    keys.length === 0 ||
+    allowedClientIds.length === 0
+  ) {
     return new Response("Not Found", { status: 404 });
   }
 

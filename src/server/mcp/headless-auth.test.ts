@@ -155,17 +155,19 @@ describe("handleHeadlessMcpRequest", () => {
     expect(response.status).toBe(200);
   });
 
-  it.each(["MCP_HEADLESS_POLICY_AUD", "OPENSEO_MCP_API_KEYS", "TEAM_DOMAIN"])(
-    "is off (404) when %s is unset",
-    async (name) => {
-      const response = await handleHeadlessMcpRequest(
-        await request({}),
-        { ...env, [name]: "" },
-        ctx,
-      );
-      expect(response.status).toBe(404);
-    },
-  );
+  it.each([
+    "MCP_HEADLESS_POLICY_AUD",
+    "OPENSEO_MCP_API_KEYS",
+    "TEAM_DOMAIN",
+    "MCP_HEADLESS_SERVICE_TOKEN_CLIENT_IDS",
+  ])("is off (404) when %s is unset", async (name) => {
+    const response = await handleHeadlessMcpRequest(
+      await request({}),
+      { ...env, [name]: "" },
+      ctx,
+    );
+    expect(response.status).toBe(404);
+  });
 
   it("rejects a missing Access JWT", async () => {
     const response = await handleHeadlessMcpRequest(

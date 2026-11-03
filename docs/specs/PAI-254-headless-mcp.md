@@ -67,7 +67,7 @@ OAuth on `/mcp` untouched. Nothing about the interactive path changes.
 
 | Condition                                                                                                                                    | Response                          |
 | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| `MCP_HEADLESS_POLICY_AUD`, `TEAM_DOMAIN` or `OPENSEO_MCP_API_KEYS` unset                                                                     | 404 (feature off)                 |
+| `MCP_HEADLESS_POLICY_AUD`, `TEAM_DOMAIN`, `OPENSEO_MCP_API_KEYS` or `MCP_HEADLESS_SERVICE_TOKEN_CLIENT_IDS` unset or empty                   | 404 (feature off)                 |
 | No / bad / wrong-AUD Access JWT, or JWT without an allowed `common_name` (for example Bryan's browser JWT from the email app on workers.dev) | 403 `{"error":"access_denied"}`   |
 | Key missing, not `oseo_`, too long or not in the hash list                                                                                   | 401 `{"error":"invalid_api_key"}` |
 | Key is valid but the bound user row is gone                                                                                                  | 401 `{"error":"invalid_api_key"}` |
@@ -168,7 +168,7 @@ key pair via `jose`:
 
 - valid service JWT + valid key → MCP handler runs with Bryan's user id and
   the path rewritten to `/mcp`;
-- feature off (no AUD or no keys) → 404;
+- feature off (no AUD, team domain, keys or client-id allowlist) → 404;
 - missing JWT, wrong AUD (email-app JWT), `common_name` not allowed → 403;
 - no key, non-`oseo_` key, unknown key → 401;
 - valid key whose user row is missing → 401, no insert;
