@@ -129,7 +129,7 @@ async function setWatch(input: {
 // Run
 // ---------------------------------------------------------------------------
 
-export type GbpRunResult = {
+type GbpRunResult = {
   status: "checked" | "already_captured";
   capturedAt: string;
   costUsd: number;

@@ -149,7 +149,7 @@ function num(value: unknown): number | null {
 }
 
 /** DataForSEO stamps ("2026-10-29 14:38:59 +00:00") as ISO; null if unusable. */
-export function dfsTimestamp(value: unknown): string | null {
+function dfsTimestamp(value: unknown): string | null {
   const raw = str(value);
   if (!raw) return null;
   const match =
