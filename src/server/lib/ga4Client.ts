@@ -8,6 +8,7 @@ import {
   Ga4TokenError,
 } from "@/server/lib/ga4Errors";
 import { GA4_OAUTH_PROVIDER_ID } from "@/shared/ga4";
+import { scopedAccessToken } from "./sharedAccessTokens";
 
 const GA4_ADMIN_API_BASE = "https://analyticsadmin.googleapis.com/v1beta";
 const GA4_ADMIN_ALPHA_API_BASE =
@@ -167,7 +168,12 @@ function memoizedGa4AccessToken(opts: {
   ga4AccountId: string;
 }) {
   let accessTokenPromise: Promise<string> | undefined;
-  return () => (accessTokenPromise ??= getGa4AccessToken(opts));
+  // One mint per grant inside a shared-token scope (CLIENT-SBLV-194).
+  return () =>
+    (accessTokenPromise ??= scopedAccessToken(
+      `ga4:${opts.userId}:${opts.ga4AccountId}`,
+      () => getGa4AccessToken(opts),
+    ));
 }
 
 /** Read-only Admin API client used only for account/property discovery. */
