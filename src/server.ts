@@ -17,8 +17,7 @@ import {
   type OpenSeoOAuthEnv,
 } from "@/server/mcp/oauth-provider";
 import { requestWithPublicOrigin } from "@/server/mcp/public-origin";
-import { MCP_ROUTE } from "@/server/mcp/context";
-import { handleSelfHostedOpenSeoMcpRequest } from "@/server/mcp/transport";
+import { routeSelfHostedMcpRequest } from "@/server/mcp/selfhost-routing";
 import { withPgClient } from "@/db";
 import {
   AUTUMN_WEBHOOK_PATH,
@@ -169,11 +168,15 @@ function handleFetch(
     );
   }
 
-  if (
-    (authMode === "cloudflare_access" || authMode === "local_noauth") &&
-    pathname === MCP_ROUTE
-  ) {
-    return handleSelfHostedOpenSeoMcpRequest(publicRequest, authMode, env, ctx);
+  // /mcp, plus /mcp/headless for agents and crons (PAI-254).
+  if (authMode === "cloudflare_access" || authMode === "local_noauth") {
+    const mcpResponse = routeSelfHostedMcpRequest(
+      publicRequest,
+      authMode,
+      env,
+      ctx,
+    );
+    if (mcpResponse) return mcpResponse;
   }
 
   return appFetch(request);

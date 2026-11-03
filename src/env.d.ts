@@ -67,6 +67,13 @@ declare namespace Cloudflare {
     // A project may have several keys; a key maps to exactly one project.
     // Unset = every request is 401.
     OPENSEO_PUBLIC_API_KEYS?: string;
+    // Headless MCP at /mcp/headless (PAI-254, src/server/mcp/headless-auth.ts).
+    // "sha256(oseo_key):userId[,...]"; unset = the route is 404.
+    OPENSEO_MCP_API_KEYS?: string;
+    // AUD of the path-scoped Access app on /mcp/headless (service token only).
+    MCP_HEADLESS_POLICY_AUD?: string;
+    // Comma-separated Access service-token client ids allowed on that path.
+    MCP_HEADLESS_SERVICE_TOKEN_CLIENT_IDS?: string;
   }
 }
 

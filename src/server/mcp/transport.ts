@@ -11,6 +11,7 @@ import { getHostedBaseUrl } from "@/lib/auth";
 import { MCP_SCOPE } from "@/lib/oauth-resource";
 import { resolveCloudflareAccessContext } from "@/middleware/ensure-user/cloudflareAccess";
 import { resolveLocalNoAuthContext } from "@/middleware/ensure-user/delegated";
+import type { EnsuredUserContext } from "@/middleware/ensure-user/types";
 import {
   createWorkersOAuthMcpProps,
   hostedWorkersOAuthMcpPropsSchema,
@@ -223,6 +224,18 @@ export async function handleSelfHostedOpenSeoMcpRequest(
     authMode === "local_noauth"
       ? await resolveLocalNoAuthContext()
       : await resolveCloudflareAccessContext(request.headers);
+  return handleSelfHostedMcpForIdentity(request, identity, env, ctx);
+}
+
+/** Serves the self-hosted MCP for an identity the caller already
+ *  authenticated (the Access JWT above, or the headless key in
+ *  headless-auth.ts). The request path must be MCP_ROUTE. */
+export function handleSelfHostedMcpForIdentity(
+  request: Request,
+  identity: Pick<EnsuredUserContext, "userId" | "userEmail" | "organizationId">,
+  env: unknown,
+  ctx: ExecutionContext,
+): Promise<Response> {
   const props = createWorkersOAuthMcpProps({
     userId: identity.userId,
     userEmail: identity.userEmail,
