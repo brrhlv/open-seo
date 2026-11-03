@@ -6,6 +6,7 @@ import {
   isExpectedGrantFailure,
 } from "@/server/lib/gscErrors";
 import { getCached, setCached } from "@/server/lib/r2-cache";
+import { sectionErrorCode } from "./sectionErrorCode";
 
 // CLIENT-SBLV-194: the scored GSC × GA4 opportunity list (the
 // get_search_opportunities tool), cached in R2 for 6 h so the summary never
@@ -14,11 +15,16 @@ import { getCached, setCached } from "@/server/lib/r2-cache";
 
 const ROW_LIMIT = 25;
 const CACHE_TTL_SECONDS = 6 * 60 * 60;
+// Unlinked and failed outcomes are cached briefly, so an outage or a missing
+// link does not cost two 1,000-row Google reads on every summary.
+const MISS_TTL_SECONDS = 10 * 60;
+// Bump when the cached shape changes.
+const CACHE_VERSION = "v2";
 // A component at or above this percentile counts as a reason.
 const STRONG = 0.66;
 
 const cacheKey = (projectId: string) =>
-  `public-summary:opportunities:${projectId}`;
+  `public-summary:opportunities:${CACHE_VERSION}:${projectId}`;
 
 const rowSchema = z.object({
   page: z.string(),
@@ -40,6 +46,12 @@ const sectionSchema = z.object({
   rows: z.array(rowSchema),
 });
 type OpportunitiesSection = z.infer<typeof sectionSchema>;
+const cachedSchema = z.union([
+  sectionSchema,
+  z.object({ connected: z.literal(false) }),
+  z.object({ error: z.string() }),
+]);
+type Outcome = z.infer<typeof cachedSchema>;
 
 type Result = Awaited<
   ReturnType<typeof SearchOpportunityService.getOpportunities>
@@ -100,11 +112,19 @@ function isUnlinked(error: unknown): boolean {
   );
 }
 
+async function remember(projectId: string, value: Outcome, ttl: number) {
+  await setCached(cacheKey(projectId), value, ttl).catch((error: unknown) => {
+    console.error("public-summary: opportunities cache write failed", error);
+  });
+}
+
+/** The section, `{ connected: false }`, or `{ error }` (a failed read,
+ *  remembered for 10 minutes like an unlinked one). */
 export async function getOpportunitiesSection(
   projectId: string,
   now: Date,
-): Promise<OpportunitiesSection | { connected: false }> {
-  const cached = sectionSchema.safeParse(
+): Promise<Outcome> {
+  const cached = cachedSchema.safeParse(
     await getCached(cacheKey(projectId)).catch(() => null),
   );
   if (cached.success) return cached.data;
@@ -116,14 +136,16 @@ export async function getOpportunitiesSection(
       { now },
     );
   } catch (error) {
-    if (isUnlinked(error)) return { connected: false };
-    throw error;
+    if (isUnlinked(error)) {
+      await remember(projectId, { connected: false }, MISS_TTL_SECONDS);
+      return { connected: false };
+    }
+    console.error("public-summary: opportunities failed", { projectId }, error);
+    const failed = { error: sectionErrorCode(error) };
+    await remember(projectId, failed, MISS_TTL_SECONDS);
+    return failed;
   }
   const section = shape(result, now);
-  await setCached(cacheKey(projectId), section, CACHE_TTL_SECONDS).catch(
-    (error: unknown) => {
-      console.error("public-summary: opportunities cache write failed", error);
-    },
-  );
+  await remember(projectId, section, CACHE_TTL_SECONDS);
   return section;
 }

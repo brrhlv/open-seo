@@ -18,7 +18,6 @@ import { summarizeRankResults } from "@/server/features/rank-tracking/services/r
 import { getLatestResults } from "@/server/features/rank-tracking/services/rankTrackingResults";
 import { Ga4ReportError } from "@/server/lib/ga4Errors";
 import {
-  GscApiError,
   GscNotConnectedError,
   isExpectedGrantFailure,
 } from "@/server/lib/gscErrors";
@@ -33,6 +32,7 @@ import { getAuditPagesSection } from "./sections/auditPages";
 import { getGa4KeyEventsSection } from "./sections/ga4KeyEvents";
 import { getIndexStatusSection } from "./sections/indexStatus";
 import { getOpportunitiesSection } from "./sections/opportunities";
+import { sectionErrorCode } from "./sections/sectionErrorCode";
 
 // Read-only project summary for external dashboards (PAI-222). Every read is
 // D1 or first-party Google data — never a DataForSEO-metered path (no
@@ -119,16 +119,6 @@ function splitSourceMedium(value: string): { source: string; medium: string } {
   return separator < 0
     ? { source: value, medium: "" }
     : { source: value.slice(0, separator), medium: value.slice(separator + 3) };
-}
-
-function sectionErrorCode(error: unknown): string {
-  if (error instanceof Ga4ReportError) return error.code;
-  if (error instanceof GscApiError) {
-    return error.status === 429
-      ? "gsc_quota_exhausted"
-      : "gsc_upstream_unavailable";
-  }
-  return "internal_error";
 }
 
 function unwrap<T>(

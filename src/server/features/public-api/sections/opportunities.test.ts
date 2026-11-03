@@ -91,7 +91,7 @@ describe("getOpportunitiesSection", () => {
       ],
     });
     expect(mocks.setCached).toHaveBeenCalledWith(
-      "public-summary:opportunities:p",
+      "public-summary:opportunities:v2:p",
       section,
       6 * 60 * 60,
     );
@@ -105,7 +105,7 @@ describe("getOpportunitiesSection", () => {
     expect(mocks.getOpportunities).not.toHaveBeenCalled();
   });
 
-  it("is connected:false when GSC or GA4 is not linked, and caches nothing", async () => {
+  it("is connected:false when GSC or GA4 is not linked, remembered for 10 minutes", async () => {
     mocks.getOpportunities.mockRejectedValueOnce(new GscNotConnectedError("p"));
     expect(await getOpportunitiesSection("p", NOW)).toEqual({
       connected: false,
@@ -116,13 +116,31 @@ describe("getOpportunitiesSection", () => {
     expect(await getOpportunitiesSection("p", NOW)).toEqual({
       connected: false,
     });
-    expect(mocks.setCached).not.toHaveBeenCalled();
+    expect(mocks.setCached).toHaveBeenCalledWith(
+      "public-summary:opportunities:v2:p",
+      { connected: false },
+      600,
+    );
   });
 
-  it("lets other failures reach the section error", async () => {
+  it("turns other failures into a section error, remembered for 10 minutes", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.getOpportunities.mockRejectedValue(
       new Ga4ReportError("ga4_quota_exhausted", "quota"),
     );
-    await expect(getOpportunitiesSection("p", NOW)).rejects.toThrow("quota");
+    expect(await getOpportunitiesSection("p", NOW)).toEqual({
+      error: "ga4_quota_exhausted",
+    });
+    expect(mocks.setCached).toHaveBeenCalledWith(
+      "public-summary:opportunities:v2:p",
+      { error: "ga4_quota_exhausted" },
+      600,
+    );
+    mocks.getOpportunities.mockClear();
+    mocks.getCached.mockResolvedValue({ error: "ga4_quota_exhausted" });
+    expect(await getOpportunitiesSection("p", NOW)).toEqual({
+      error: "ga4_quota_exhausted",
+    });
+    expect(mocks.getOpportunities).not.toHaveBeenCalled();
   });
 });
