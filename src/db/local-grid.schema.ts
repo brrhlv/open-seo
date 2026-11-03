@@ -39,6 +39,8 @@ export const localGridConfigs = sqliteTable(
     isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
     lastCheckedAt: text("last_checked_at"),
     nextCheckAt: text("next_check_at"),
+    // A run in progress (cron or MCP) holds this until it ends or expires.
+    leaseUntil: text("lease_until"),
     lastError: text("last_error"),
     createdAt: text("created_at")
       .notNull()
@@ -57,7 +59,11 @@ export const localGridKeywords = sqliteTable(
     configId: text("config_id")
       .notNull()
       .references(() => localGridConfigs.id, { onDelete: "cascade" }),
+    // Stored lowercased; snapshots carry the same text.
     keyword: text("keyword").notNull(),
+    // Failed or degraded runs this attempt_period (YYYY-MM); capped per month.
+    attempts: integer("attempts").notNull().default(0),
+    attemptPeriod: text("attempt_period"),
     createdAt: text("created_at")
       .notNull()
       .default(sql`(current_timestamp)`),
@@ -91,6 +97,8 @@ export const localGridSnapshots = sqliteTable(
     device: text("device", { enum: ["desktop", "mobile"] }).notNull(),
     pointsSearched: integer("points_searched").notNull(),
     pointsFound: integer("points_found").notNull(),
+    // Points whose search failed; over a third and the month is not captured.
+    pointsFailed: integer("points_failed").notNull().default(0),
     top3Count: integer("top3_count").notNull(),
     top10Count: integer("top10_count").notNull(),
     solvPct: real("solv_pct"),

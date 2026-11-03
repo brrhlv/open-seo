@@ -43,6 +43,7 @@ export const localGridConfigs = pgTable(
     isActive: boolean("is_active").notNull().default(true),
     lastCheckedAt: timestampColumn("last_checked_at"),
     nextCheckAt: timestampColumn("next_check_at"),
+    leaseUntil: timestampColumn("lease_until"),
     lastError: text("last_error"),
     createdAt: timestampColumn("created_at").notNull().default(isoNow),
   },
@@ -60,6 +61,8 @@ export const localGridKeywords = pgTable(
       .notNull()
       .references(() => localGridConfigs.id, { onDelete: "cascade" }),
     keyword: text("keyword").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    attemptPeriod: text("attempt_period"),
     createdAt: timestampColumn("created_at").notNull().default(isoNow),
   },
   (table) => [
@@ -87,6 +90,7 @@ export const localGridSnapshots = pgTable(
     device: text("device", { enum: ["desktop", "mobile"] }).notNull(),
     pointsSearched: integer("points_searched").notNull(),
     pointsFound: integer("points_found").notNull(),
+    pointsFailed: integer("points_failed").notNull().default(0),
     top3Count: integer("top3_count").notNull(),
     top10Count: integer("top10_count").notNull(),
     solvPct: real("solv_pct"),
