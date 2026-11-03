@@ -84,21 +84,22 @@ function charge(usd: number) {
 }
 
 // The SBLV seed from the spec (Bryan, 2026-11-02 and 2026-11-03): Photo booth
-// primary; Balloon artist, Event management company and Event planner are
-// accepted secondaries; no wedding, photographer or party-rental categories.
+// primary; Balloon artist, Event management company, Event planner and Party
+// equipment rental service are accepted secondaries; no wedding or
+// photographer categories.
 const SBLV_EXPECTED = {
   primaryCategory: "Photo booth",
   allowedAdditionalCategories: [
     "Balloon artist",
     "Event management company",
     "Event planner",
+    "Party equipment rental service",
   ],
   forbiddenCategories: [
     "Wedding service",
     "Wedding photographer",
     "Photographer",
     "Photography service",
-    "Party equipment rental service",
   ],
   website: "https://socialboothlv.com/",
 };
@@ -169,13 +170,13 @@ describe("GbpWatchService", () => {
     ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
   });
 
-  it("stores the first run as a baseline with its real cost; party rental is the only drift", async () => {
+  it("stores the first run as a baseline with its real cost; the live profile has no drift", async () => {
     await createWatch();
     const result = await run(MON);
     expect(result).toMatchObject({
       status: "checked",
       changes: 0,
-      drift: 1,
+      drift: 0,
       collected: { reviews: true, updates: true },
     });
     // Profile + reviews + posts; no Q&A call (retired by Google, still billed).
@@ -185,15 +186,7 @@ describe("GbpWatchService", () => {
     expect(view.profile?.primaryCategory).toBe("Photo booth");
     expect(view.newReviewCount).toBe(0);
     expect(view.latestReviews).toHaveLength(5);
-    expect(view.driftFromExpected).toEqual([
-      {
-        field: "additionalCategories",
-        rule: "forbidden_category",
-        expected: "Not listed",
-        actual: "Party equipment rental service",
-        since: MON.toISOString(),
-      },
-    ]);
+    expect(view.driftFromExpected).toEqual([]);
     expect(mocks.configs.get(PROJECT)?.lastCheckedAt).toBe(MON.toISOString());
   });
 
@@ -209,6 +202,11 @@ describe("GbpWatchService", () => {
 
   it("diffs the next run against the previous one and keeps the drift's start", async () => {
     await createWatch();
+    // A website expectation the live profile misses, so a drift spans both runs.
+    await GbpWatchService.setWatch({
+      projectId: PROJECT,
+      expected: { ...SBLV_EXPECTED, website: "https://socialboothlv.com/book" },
+    });
     await run(MON);
     mocks.business.myBusinessInfo.mockResolvedValue({
       ...structuredClone(profileFixture),
@@ -248,10 +246,9 @@ describe("GbpWatchService", () => {
       author: "Reviewer A",
       isNew: true,
     });
-    const party = view.driftFromExpected.find(
-      (d) => d.rule === "forbidden_category",
-    );
-    expect(party?.since).toBe(MON.toISOString());
+    expect(
+      view.driftFromExpected.find((d) => d.rule === "website")?.since,
+    ).toBe(MON.toISOString());
     expect(
       view.driftFromExpected.find((d) => d.rule === "primary_category")?.since,
     ).toBe(NEXT_MON.toISOString());

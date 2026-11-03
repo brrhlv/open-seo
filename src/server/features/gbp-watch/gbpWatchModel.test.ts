@@ -28,19 +28,16 @@ const EVERY_DAY = {
   saturday: ["09:00-21:00"],
   sunday: ["09:00-21:00"],
 };
-// Bryan's accepted state, 2026-11-02.
+// Bryan's accepted state (2026-11-02; party rental accepted 2026-11-03).
 const SBLV_EXPECTED: GbpExpected = {
   primaryCategory: "Photo booth",
   allowedAdditionalCategories: [
     "Balloon artist",
     "Event management company",
     "Event planner",
-  ],
-  forbiddenCategories: [
-    "Wedding service",
-    "Photographer",
     "Party equipment rental service",
   ],
+  forbiddenCategories: ["Wedding service", "Photographer"],
   website: "https://socialboothlv.com/",
   hours: EVERY_DAY,
 };
@@ -121,13 +118,20 @@ describe("formatHoursText", () => {
 });
 
 describe("driftFromExpected", () => {
-  it("flags the forbidden party-rental category on the live profile", () => {
-    expect(driftFromExpected(live, SBLV_EXPECTED)).toEqual([
+  it("finds no drift on the live profile against SBLV's accepted state", () => {
+    expect(driftFromExpected(live, SBLV_EXPECTED)).toEqual([]);
+  });
+
+  it("flags a forbidden category", () => {
+    const withWedding = profile({
+      additionalCategories: [...live.additionalCategories, "Wedding service"],
+    });
+    expect(driftFromExpected(withWedding, SBLV_EXPECTED)).toEqual([
       {
         field: "additionalCategories",
         rule: "forbidden_category",
         expected: "Not listed",
-        actual: "Party equipment rental service",
+        actual: "Wedding service",
       },
     ]);
   });

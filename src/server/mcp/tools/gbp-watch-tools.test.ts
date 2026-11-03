@@ -59,7 +59,7 @@ describe("GBP watch MCP tools", () => {
         capturedAt: "2026-11-09T14:00:00.000Z",
         title: "Social Booth LV",
         primaryCategory: "Photo booth",
-        additionalCategories: ["Party equipment rental service"],
+        additionalCategories: ["Wedding service"],
         website: "https://socialboothlv.com/",
         hoursText: "Every day 09:00–21:00",
       },
@@ -73,7 +73,7 @@ describe("GBP watch MCP tools", () => {
           field: "additionalCategories",
           rule: "forbidden_category",
           expected: "Not listed",
-          actual: "Party equipment rental service",
+          actual: "Wedding service",
           since: "2026-11-09T14:00:00.000Z",
         },
       ],
@@ -86,7 +86,7 @@ describe("GBP watch MCP tools", () => {
     );
 
     expect(textContent(result)).toContain(
-      "drift from the accepted state: forbidden_category Party equipment rental service",
+      "drift from the accepted state: forbidden_category Wedding service",
     );
     expect(textContent(result)).toContain("No credits were used.");
     expect(getGbpWatchTool.config.annotations.readOnlyHint).toBe(true);
@@ -143,7 +143,7 @@ describe("GBP watch MCP tools", () => {
         cid: "5590594803775798319",
         expected: {
           primaryCategory: "Photo booth",
-          forbiddenCategories: ["Party equipment rental service"],
+          forbiddenCategories: ["Wedding service"],
           website: "https://socialboothlv.com/",
           hours: { monday: ["09:00-21:00"] },
         },
