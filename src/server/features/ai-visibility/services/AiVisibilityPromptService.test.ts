@@ -216,7 +216,7 @@ describe("AiVisibilityPromptService runs", () => {
         position: 1,
         cited_url: "https://socialboothlv.com/corporate-events",
       },
-      { platform: "google_ai_mode", status: "ok", position: 2 },
+      { platform: "google_ai_mode", status: "ok", position: 1 },
       { platform: "perplexity", status: "ok", mentioned: 0, position: null },
     ]);
   });

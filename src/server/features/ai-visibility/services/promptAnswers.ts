@@ -76,6 +76,8 @@ const AGGREGATOR_STEMS = new Set([
   "pinterest",
   "bbb",
   "nextdoor",
+  "zola",
+  "wikipedia",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -91,18 +93,19 @@ function hostMatches(host: string, domain: string): boolean {
   return host === domain || host.endsWith(`.${domain}`);
 }
 
-/** "socialboothlv.com" → "socialboothlv"; "foo.co.uk" → "foo". */
-function domainStem(domain: string): string {
-  const labels = domain
-    .toLowerCase()
-    .replace(/^www\./, "")
-    .split(".");
+/**
+ * The registrable label of a host: "socialboothlv.com" → "socialboothlv",
+ * "m.yelp.com" → "yelp", "en.wikipedia.org" → "wikipedia", "foo.co.uk" →
+ * "foo". Subdomains never change the stem.
+ */
+export function domainStem(domain: string): string {
+  const labels = domain.toLowerCase().split(".").filter(Boolean);
   if (labels.length <= 1) return compactName(labels[0] ?? "");
   const last = labels.at(-1) ?? "";
   const secondLast = labels.at(-2) ?? "";
-  const drop =
-    labels.length >= 3 && last.length === 2 && secondLast.length <= 3 ? 2 : 1;
-  return compactName(labels.slice(0, -drop).join(""));
+  const twoPartSuffix =
+    labels.length >= 3 && last.length === 2 && secondLast.length <= 3;
+  return compactName(labels.at(twoPartSuffix ? -3 : -2) ?? "");
 }
 
 /** Drops utm_* parameters and a trailing "?" so a cited page reads cleanly. */
@@ -126,9 +129,22 @@ type TrackedBrand = {
   key: string;
   domain: string | null;
   name: string | null;
+  /** Matched anywhere in the text as 1–6 consecutive words. */
   names: string[];
+  /**
+   * A competitor's domain stem (or a name that is only the domain): matched
+   * in the text only as one word ("BoothNV"), else by a link or an exact
+   * ChatGPT entity, so "lasvegasphotobooth.com" never matches the phrase
+   * "Las Vegas photo booth".
+   */
+  stems: string[];
   isTarget: boolean;
 };
+
+/** A stored competitor name that is just its domain ("BoothNV", "x.com"). */
+const isDomainDerived = (name: string, stem: string) =>
+  !/\s/.test(name.trim()) &&
+  compactName(name.replace(/\.[a-z]{2,}$/i, "")) === stem;
 
 function usableNames(values: (string | null | undefined)[]): string[] {
   return dedupe(
@@ -164,10 +180,13 @@ function firstNameOffsets(
   words: Word[],
   nameToKey: Map<string, string>,
   fromOffset = 0,
+  singleWordToKey: Map<string, string> = new Map(),
 ): Map<string, number> {
   const found = new Map<string, number>();
   for (let i = 0; i < words.length; i++) {
     if ((words[i]?.offset ?? 0) < fromOffset) continue;
+    const single = singleWordToKey.get(words[i]?.word ?? "");
+    if (single && !found.has(single)) found.set(single, words[i]?.offset ?? 0);
     let joined = "";
     for (let j = i; j < Math.min(words.length, i + MAX_WINDOW_WORDS); j++) {
       joined += words[j]?.word ?? "";
@@ -208,30 +227,40 @@ export function analyzeAnswer(
       key: "target",
       domain: targetDomain,
       name: null,
+      // The client's own stem ("Social Booth LV") is trusted as words.
       names: usableNames([
         targetDomain ? domainStem(targetDomain) : null,
         ...(brands.target.names ?? []),
       ]),
+      stems: [],
       isTarget: true,
     },
     ...brands.competitors
       .filter((c) => c.domain.toLowerCase() !== targetDomain)
       .map((c) => {
         const domain = c.domain.toLowerCase();
+        const stem = domainStem(domain);
+        const curated =
+          c.name && !isDomainDerived(c.name, stem) ? c.name : null;
         return {
           key: `competitor:${domain}`,
           domain,
           name: c.name ?? null,
-          names: usableNames([domainStem(domain), c.name]),
+          names: usableNames([curated]),
+          stems: usableNames([stem]),
           isTarget: false,
         };
       }),
   ];
 
   const nameToKey = new Map<string, string>();
+  const stemToKey = new Map<string, string>();
   for (const brand of tracked) {
     for (const name of brand.names) {
       if (!nameToKey.has(name)) nameToKey.set(name, brand.key);
+    }
+    for (const stem of brand.stems) {
+      if (!stemToKey.has(stem)) stemToKey.set(stem, brand.key);
     }
   }
 
@@ -250,7 +279,12 @@ export function analyzeAnswer(
     if (known === undefined || offset < known) offsets.set(key, offset);
   };
 
-  for (const [key, offset] of firstNameOffsets(words, nameToKey)) {
+  for (const [key, offset] of firstNameOffsets(
+    words,
+    nameToKey,
+    0,
+    stemToKey,
+  )) {
     note(key, offset);
   }
 
@@ -276,19 +310,20 @@ export function analyzeAnswer(
   for (const entity of answer.entities) {
     const variants = entityVariants(entity);
     if (variants.length === 0) continue;
-    const trackedKey = variants
-      .map((variant) => nameToKey.get(variant))
-      .find(Boolean);
-    const located = firstNameOffsets(
+    const found = firstNameOffsets(
       words,
       new Map(variants.map((variant) => [variant, "entity"])),
       previousOffset,
     ).get("entity");
-    const offset = located ?? previousOffset;
-    previousOffset = offset;
-    const key = trackedKey ?? `entity:${variants[0]}`;
-    // A tracked brand found by name already has its offset; only fill gaps.
-    if (!offsets.has(key)) note(key, offset);
+    previousOffset = found ?? previousOffset;
+    // An exact entity name may also match a competitor's domain stem.
+    // (Entity blocks' sources are not used: DataForSEO often attaches a
+    // block's sources to the next block, which would merge the wrong brands.)
+    const key =
+      variants
+        .map((variant) => nameToKey.get(variant) ?? stemToKey.get(variant))
+        .find(Boolean) ?? `entity:${variants[0]}`;
+    note(key, previousOffset);
   }
 
   const ordered = sort(
@@ -299,8 +334,12 @@ export function analyzeAnswer(
     })),
     (a, b) => a.offset - b.offset || a.index - b.index,
   ).map((entry) => entry.key);
+  // Position counts brands we can name (tracked ones and ChatGPT entities).
+  // A bare linked host is often an event venue, a blog or a national chain
+  // page, so it counts in brandsNamed but never pushes our position down.
+  const ranked = ordered.filter((key) => !key.startsWith("host:"));
   const positionOf = (key: string) => {
-    const index = ordered.indexOf(key);
+    const index = ranked.indexOf(key);
     return index === -1 ? null : index + 1;
   };
 

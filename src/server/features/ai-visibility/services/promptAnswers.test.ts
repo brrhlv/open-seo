@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   analyzeAnswer,
+  domainStem,
   normalizeChatGptScraper,
   normalizeGoogleAiMode,
   normalizePerplexity,
@@ -69,17 +70,64 @@ describe("buyer prompt answers", () => {
     );
   });
 
-  it("Google AI Mode: an untracked vendor listed first pushes us to #2; Maps links are ignored", () => {
+  it("Google AI Mode: a linked host counts in brandsNamed but not in position; Maps links are ignored", () => {
     const normalized = normalizeGoogleAiMode(FIXTURES.google_ai_mode_1);
     expect(normalized.links.some((l) => l.url.includes("google.com"))).toBe(
       false,
     );
+    // Shutterbox (a national chain's LA page) and ShutterBooth are linked
+    // before/after us: four brands, but only tracked ones set the rank.
     expect(analyzeAnswer(normalized, BRANDS)).toMatchObject({
       mentioned: true,
-      position: 2,
+      position: 1,
       brandsNamed: 4,
       citedUrl: "https://socialboothlv.com/",
-      competitors: [{ domain: "joysquad.com", position: 4 }],
+      competitors: [{ domain: "joysquad.com", position: 2 }],
+    });
+  });
+
+  it("Perplexity: directories on any subdomain and event sites don't push us down", () => {
+    // zola.com and america.imexevents.com are cited before Social Booth LV.
+    expect(
+      analyzeAnswer(normalizePerplexity(FIXTURES.perplexity_8), BRANDS),
+    ).toMatchObject({ mentioned: true, position: 1, brandsNamed: 4 });
+    expect(domainStem("m.yelp.com")).toBe("yelp");
+    expect(domainStem("en.wikipedia.org")).toBe("wikipedia");
+    expect(domainStem("america.imexevents.com")).toBe("imexevents");
+    expect(domainStem("foo.co.uk")).toBe("foo");
+  });
+
+  it("a keyword-domain competitor needs a link or an exact entity, not the generic phrase", () => {
+    const generic = { domain: "lasvegasphotobooth.com", name: null };
+    const text =
+      "The best Las Vegas photo booth companies: **1. Social Booth LV**.";
+    expect(
+      analyzeAnswer(answer(text), { ...BRANDS, competitors: [generic] }),
+    ).toMatchObject({ position: 1, brandsNamed: 1, competitors: [] });
+    expect(
+      analyzeAnswer(
+        answer(`${text} Also [LVPB](https://lasvegasphotobooth.com/).`, {
+          links: [{ url: "https://lasvegasphotobooth.com/", offset: 70 }],
+        }),
+        { ...BRANDS, competitors: [generic] },
+      ),
+    ).toMatchObject({
+      position: 1,
+      competitors: [{ domain: "lasvegasphotobooth.com", position: 2 }],
+    });
+    // MiHi's domain is photoboothrentallasvegasnv.com. With no stored name it
+    // is found only by its website link; with its name, by ChatGPT's entity.
+    const mihi = (name: string | null) =>
+      analyzeAnswer(normalizeChatGptScraper(FIXTURES.chat_gpt_2), {
+        ...BRANDS,
+        competitors: [{ domain: "photoboothrentallasvegasnv.com", name }],
+      });
+    expect(mihi(null).competitors.map((c) => c.domain)).toEqual([
+      "photoboothrentallasvegasnv.com",
+    ]);
+    expect(mihi("MiHi Photo Booth Rental Las Vegas")).toMatchObject({
+      position: 2,
+      competitors: [{ domain: "photoboothrentallasvegasnv.com", position: 1 }],
     });
   });
 
@@ -146,7 +194,9 @@ describe("buyer prompt answers", () => {
     const result = analyzeAnswer(
       answer(
         "Look for Las Vegas photo booth companies. **1. Social Booth LV** first. **2. Las Vegas Photo** second.",
-        { entities: ["Social Booth LV", "Las Vegas Photo"] },
+        {
+          entities: ["Social Booth LV", "Las Vegas Photo"],
+        },
       ),
       BRANDS,
     );
