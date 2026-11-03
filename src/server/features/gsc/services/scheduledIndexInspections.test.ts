@@ -145,7 +145,7 @@ describe("runScheduledIndexInspections", () => {
     await Scheduler.runScheduledIndexInspections(NOW);
 
     const urls = mocks.inspectUrls.mock.calls[0]?.[0].urls ?? [];
-    expect(urls).toHaveLength(Scheduler.INSPECTIONS_PER_TICK);
+    expect(urls).toHaveLength(8);
     expect(urls).not.toContain("https://a.com/p0");
     // Eight never-inspected pages fill the tick before the stale one.
     expect(urls).not.toContain("https://a.com/p1");

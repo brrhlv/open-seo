@@ -12,7 +12,7 @@ import { isHostedServerAuthMode } from "@/server/lib/runtime-env";
 // property). Runs on the */5 tick beside rank checks and AI visibility, which
 // share Workers Free's 50-subrequest cap, so a tick inspects a few URLs and
 // the rest stay due for the next tick.
-export const INSPECTIONS_PER_TICK = 8;
+const INSPECTIONS_PER_TICK = 8;
 const DAY_MS = 24 * 60 * 60_000;
 
 /** A host without a leading www, lowercased. */
@@ -24,7 +24,7 @@ const bareHost = (host: string) => host.toLowerCase().replace(/^www\./, "");
  * as is. URL-prefix properties take its path and query on the property's
  * origin, because key pages are stored without `www`.
  */
-export function inspectionUrlFor(
+function inspectionUrlFor(
   keyPageUrl: string,
   siteUrl: string,
 ): string | null {

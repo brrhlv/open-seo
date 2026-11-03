@@ -47,7 +47,7 @@ type Result = Awaited<
 type Row = Result["rows"][number];
 
 /** Reason codes, strongest first. */
-export function whyCodes(row: Row, businessValueMetric: string): string[] {
+function whyCodes(row: Row, businessValueMetric: string): string[] {
   const codes: { code: string; weight: number }[] = [];
   const c = row.scoreComponents;
   if (c) {
