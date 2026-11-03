@@ -5,7 +5,16 @@ import {
   fetchGoogleAiModeAnswer,
 } from "./ai-prompts";
 
-const mocks = vi.hoisted(() => ({ dataforseoPost: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  dataforseoPost:
+    vi.fn<
+      (
+        path: string,
+        tasks: unknown[],
+        options?: { signal?: AbortSignal },
+      ) => Promise<unknown>
+    >(),
+}));
 vi.mock("@/server/lib/dataforseo/core", () => ({
   dataforseoPost: mocks.dataforseoPost,
 }));
@@ -29,6 +38,7 @@ describe("buyer prompt fetchers", () => {
     expect(CHATGPT_SCRAPER_TIMEOUT_MS).toBe(150_000);
     expect(timeout).toHaveBeenCalledWith(150_000);
     expect(mocks.dataforseoPost.mock.calls[0]?.[2]).toMatchObject({
+      // oxlint-disable-next-line typescript/no-unsafe-assignment -- vitest matcher
       signal: expect.any(AbortSignal),
       maxServerErrorRetries: 0,
     });

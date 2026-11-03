@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { z } from "zod";
 import { createClient, type Client } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import {
@@ -20,12 +21,16 @@ vi.mock("cloudflare:workers", () => ({
   waitUntil: (promise: Promise<unknown>) => void promise.catch(() => {}),
 }));
 
-const FIXTURES: Record<string, unknown> = JSON.parse(
-  readFileSync(
-    "src/server/features/ai-visibility/services/__fixtures__/prompt-answers.json",
-    "utf8",
-  ),
-);
+const FIXTURES = z
+  .record(z.string(), z.unknown())
+  .parse(
+    JSON.parse(
+      readFileSync(
+        "src/server/features/ai-visibility/services/__fixtures__/prompt-answers.json",
+        "utf8",
+      ),
+    ),
+  );
 
 const mocks = vi.hoisted(() => ({
   onCost: { current: undefined as ((usd: number) => void) | undefined },

@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { z } from "zod";
 import { describe, expect, it } from "vitest";
 import {
   analyzeAnswer,
@@ -11,12 +12,16 @@ import {
 
 // Real DataForSEO responses for SBLV buyer prompts (2026-11-02), trimmed to
 // the fields the parser reads.
-const FIXTURES: Record<string, unknown> = JSON.parse(
-  readFileSync(
-    "src/server/features/ai-visibility/services/__fixtures__/prompt-answers.json",
-    "utf8",
-  ),
-);
+const FIXTURES = z
+  .record(z.string(), z.unknown())
+  .parse(
+    JSON.parse(
+      readFileSync(
+        "src/server/features/ai-visibility/services/__fixtures__/prompt-answers.json",
+        "utf8",
+      ),
+    ),
+  );
 
 const BRANDS = {
   target: { domain: "socialboothlv.com" },

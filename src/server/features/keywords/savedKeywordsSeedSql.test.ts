@@ -61,7 +61,7 @@ const run = (db: DatabaseSync, sql: string) => {
     if (line.startsWith("INSERT")) db.exec(line);
 };
 const count = (db: DatabaseSync, table: string) =>
-  (db.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n;
+  Number(db.prepare(`SELECT count(*) AS n FROM ${table}`).get()?.n);
 
 describe("buildSavedKeywordsSeedSql", () => {
   it("normalizes, quotes and orders the statements", () => {
