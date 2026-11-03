@@ -148,6 +148,18 @@ describe("handleHeadlessMcpRequest", () => {
     expect(identity).toMatchObject({ userId: USER_ID });
   });
 
+  it("strips the credentials from the request it forwards", async () => {
+    const req = await request({});
+    req.headers.set("x-api-key", KEY);
+    await handleHeadlessMcpRequest(req, env, ctx);
+
+    const [forwarded] = mocks.handleSelfHostedMcpForIdentity.mock.calls[0];
+    expect(forwarded.headers.get("authorization")).toBeNull();
+    expect(forwarded.headers.get("x-api-key")).toBeNull();
+    expect(forwarded.headers.get("cf-access-jwt-assertion")).toBeNull();
+    expect(forwarded.headers.get("content-type")).toBe("application/json");
+  });
+
   it("accepts the key from x-api-key", async () => {
     const req = await request({ key: null });
     req.headers.set("x-api-key", KEY);
@@ -253,6 +265,14 @@ describe("handleHeadlessMcpRequest", () => {
 });
 
 describe("parseMcpApiKeys", () => {
+  it("drops every entry whose hash is listed more than once", () => {
+    const dup = "e".repeat(64);
+    const ok = "f".repeat(64);
+    expect(parseMcpApiKeys(`${dup}:u1,${ok}:u2,${dup}:u3`)).toEqual([
+      { hash: ok, userId: "u2" },
+    ]);
+  });
+
   it("keeps hash:userId entries and drops malformed ones", () => {
     const hash = "c".repeat(64);
     expect(

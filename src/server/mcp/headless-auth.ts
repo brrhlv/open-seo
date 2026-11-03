@@ -34,25 +34,41 @@ type McpApiKey = { hash: string; userId: string };
 
 const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
 const MAX_PRESENTED_KEY_LENGTH = 256;
+const CREDENTIAL_HEADERS = [
+  "authorization",
+  "x-api-key",
+  "cf-access-jwt-assertion",
+] as const;
 
 /** OPENSEO_MCP_API_KEYS = "sha256hex:userId[,sha256hex:userId]". Malformed
- *  entries are dropped (fail closed); only their count is logged. */
+ *  entries, and every entry of a hash listed more than once (its binding is
+ *  ambiguous), are dropped (fail closed). Only counts are logged. */
 export function parseMcpApiKeys(raw: string | undefined): McpApiKey[] {
-  const keys: McpApiKey[] = [];
-  let dropped = 0;
+  const candidates: McpApiKey[] = [];
+  let malformed = 0;
   for (const entry of (raw ?? "").split(",")) {
     if (!entry.trim()) continue;
     const separator = entry.indexOf(":");
     const hash = entry.slice(0, separator).trim().toLowerCase();
     const userId = entry.slice(separator + 1).trim();
     if (separator < 0 || !SHA256_HEX_RE.test(hash) || !userId) {
-      dropped++;
+      malformed++;
       continue;
     }
-    keys.push({ hash, userId });
+    candidates.push({ hash, userId });
   }
-  if (dropped > 0) {
-    console.warn(`[mcp-headless] dropped ${dropped} malformed key entries`);
+
+  const hashCounts = new Map<string, number>();
+  for (const { hash } of candidates) {
+    hashCounts.set(hash, (hashCounts.get(hash) ?? 0) + 1);
+  }
+  const keys = candidates.filter(({ hash }) => hashCounts.get(hash) === 1);
+  const duplicates = candidates.length - keys.length;
+
+  if (malformed > 0 || duplicates > 0) {
+    console.warn(
+      `[mcp-headless] dropped ${malformed} malformed and ${duplicates} duplicate key entries`,
+    );
   }
   return keys;
 }
@@ -174,14 +190,13 @@ export async function handleHeadlessMcpRequest(
     if (!user?.email) return json(401, "invalid_api_key");
     const identity = await resolveSharedWorkspaceContext(user.id, user.email);
 
+    // The MCP handler gets the request at /mcp without the credentials: the
+    // identity above is the only auth it should ever see.
     const url = new URL(request.url);
     url.pathname = MCP_ROUTE;
-    return await handleSelfHostedMcpForIdentity(
-      new Request(url, request),
-      identity,
-      env,
-      ctx,
-    );
+    const forwarded = new Request(url, request);
+    for (const name of CREDENTIAL_HEADERS) forwarded.headers.delete(name);
+    return await handleSelfHostedMcpForIdentity(forwarded, identity, env, ctx);
   } catch (error) {
     console.error("[mcp-headless] 500 (internal):", error);
     return json(500, "internal_error");
