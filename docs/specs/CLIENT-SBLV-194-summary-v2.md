@@ -9,12 +9,12 @@ on the public summary (LodeRx) ignores the new keys.
 The summary (`GET /api/public/v1/projects/{id}/summary?range=…`, PAI-222) gains four
 additive sections built on services that already exist:
 
-| Key | Built on | Source | Cost |
-|---|---|---|---|
-| `opportunities` | `SearchOpportunityService.getOpportunities` (the `get_search_opportunities` MCP tool) | GSC × GA4, live, cached 6 h in R2 | free |
-| `auditPages` | latest completed audit in D1 (`audit_pages`, `audit_issues`, `audit_lighthouse_results`) | D1 | free |
-| `indexStatus` | `GscService.inspectUrls` (the `inspect_urls` tool), run by the cron, stored in D1 | D1 only on read | free (GSC quota) |
-| `ga4.keyEvents` | `Ga4ReportingService.runReport` kinds `key_events` and `landing_pages` | GA4, live | free |
+| Key             | Built on                                                                                 | Source                            | Cost             |
+| --------------- | ---------------------------------------------------------------------------------------- | --------------------------------- | ---------------- |
+| `opportunities` | `SearchOpportunityService.getOpportunities` (the `get_search_opportunities` MCP tool)    | GSC × GA4, live, cached 6 h in R2 | free             |
+| `auditPages`    | latest completed audit in D1 (`audit_pages`, `audit_issues`, `audit_lighthouse_results`) | D1                                | free             |
+| `indexStatus`   | `GscService.inspectUrls` (the `inspect_urls` tool), run by the cron, stored in D1        | D1 only on read                   | free (GSC quota) |
+| `ga4.keyEvents` | `Ga4ReportingService.runReport` kinds `key_events` and `landing_pages`                   | GA4, live                         | free             |
 
 No DataForSEO call anywhere in this ticket.
 
@@ -40,23 +40,24 @@ TypeScript shapes as returned (JSON). `null` means "no value", never "unknown ke
 
 ```ts
 type Opportunities =
-  | { connected: false }                       // GSC or GA4 not linked
+  | { connected: false } // GSC or GA4 not linked
   | {
       connected: true;
-      capturedAt: string;                      // when GSC/GA4 were read (cache fill time)
+      capturedAt: string; // when GSC/GA4 were read (cache fill time)
       dateRange: { startDate: string; endDate: string }; // fixed 28 complete days, GA4 property time zone
       businessValueMetric: "sessionKeyEventRate" | "engagementRate";
-      totalCandidates: number;                 // GSC pages at positions 4–20
-      rows: Array<{                            // best score first, max 25
-        page: string;                          // URL as GSC reports it
-        score: number | null;                  // 0..100; null when GA4 has no row for the page
-        why: string[];                         // reason codes, strongest first (see below)
+      totalCandidates: number; // GSC pages at positions 4–20
+      rows: Array<{
+        // best score first, max 25
+        page: string; // URL as GSC reports it
+        score: number | null; // 0..100; null when GA4 has no row for the page
+        why: string[]; // reason codes, strongest first (see below)
         clicks: number;
         impressions: number;
-        ctr: number;                           // 0..1
-        position: number;                      // average GSC position
-        sessions: number | null;               // GA4 organic sessions; null when unmatched
-        keyEvents: number | null;              // GA4 organic key events; null when unmatched
+        ctr: number; // 0..1
+        position: number; // average GSC position
+        sessions: number | null; // GA4 organic sessions; null when unmatched
+        keyEvents: number | null; // GA4 organic key events; null when unmatched
       }>;
     };
 
@@ -65,56 +66,69 @@ type Opportunities =
 // >= 100 impressions), "no_analytics" (GSC page with no GA4 landing-page row).
 
 type AuditPages = {
-  status: "none" | "running" | "completed" | "failed";  // "none" = no audit yet
+  status: "none" | "running" | "completed" | "failed"; // "none" = no audit yet
   auditId: string | null;
-  capturedAt: string | null;                  // completedAt ?? startedAt of that audit
+  capturedAt: string | null; // completedAt ?? startedAt of that audit
   pagesCrawled: number;
-  hasLighthouse: boolean;                     // any Lighthouse row in this audit
-  truncated: boolean;                         // more than 250 pages crawled
-  pages: Array<{                              // pages with issues first (critical, warning, info), then by URL
+  hasLighthouse: boolean; // any Lighthouse row in this audit
+  truncated: boolean; // more than 250 pages crawled
+  pages: Array<{
+    // pages with issues first (critical, warning, info), then by URL
     url: string;
     statusCode: number | null;
     issueCounts: { critical: number; warning: number; info: number };
     issues: Array<{
-      issueType: string;                      // e.g. "title-too-long"
+      issueType: string; // e.g. "title-too-long"
       severity: "critical" | "warning" | "info";
-      occurrences: number;                    // link-level types write one row per occurrence
+      occurrences: number; // link-level types write one row per occurrence
       details: Record<string, unknown> | null; // parsed details_json of the first row, e.g. { "length": 192 }
     }>;
     lighthouse: {
       mobile: LighthouseScores | null;
       desktop: LighthouseScores | null;
-    } | null;                                 // null when no strategy has a result
+    } | null; // null when no strategy has a result
   }>;
 };
 type LighthouseScores = {
-  performance: number | null; accessibility: number | null; bestPractices: number | null; seo: number | null; // 0..100
-  lcpMs: number | null; cls: number | null; inpMs: number | null; ttfbMs: number | null;
+  performance: number | null;
+  accessibility: number | null;
+  bestPractices: number | null;
+  seo: number | null; // 0..100
+  lcpMs: number | null;
+  cls: number | null;
+  inpMs: number | null;
+  ttfbMs: number | null;
 };
 
 type IndexStatus =
   | { connected: false }
   | {
       connected: true;
-      capturedAt: string | null;              // newest inspectedAt; null before the first run
-      nextCheckAfter: string | null;          // oldest inspectedAt + 24 h (when the cron may refresh)
-      counts: { indexed: number; notIndexed: number; failed: number; pending: number };
-      pages: Array<{                          // project key pages, by URL
-        url: string;                          // the key page URL (as stored in project context)
-        inspectedUrl: string | null;          // the URL actually sent to GSC (rebased on URL-prefix properties)
+      capturedAt: string | null; // newest inspectedAt; null before the first run
+      nextCheckAfter: string | null; // oldest inspectedAt + 24 h (when the cron may refresh)
+      counts: {
+        indexed: number;
+        notIndexed: number;
+        failed: number;
+        pending: number;
+      };
+      pages: Array<{
+        // project key pages, by URL
+        url: string; // the key page URL (as stored in project context)
+        inspectedUrl: string | null; // the URL actually sent to GSC (rebased on URL-prefix properties)
         state: "indexed" | "not_indexed" | "failed" | "pending";
-        verdict: string | null;               // GSC: PASS | PARTIAL | FAIL | NEUTRAL | VERDICT_UNSPECIFIED
-        coverageState: string | null;         // e.g. "Submitted and indexed", "Crawled - currently not indexed"
+        verdict: string | null; // GSC: PASS | PARTIAL | FAIL | NEUTRAL | VERDICT_UNSPECIFIED
+        coverageState: string | null; // e.g. "Submitted and indexed", "Crawled - currently not indexed"
         indexingState: string | null;
         robotsTxtState: string | null;
         pageFetchState: string | null;
         googleCanonical: string | null;
         userCanonical: string | null;
-        canonicalMismatch: boolean;           // both canonicals set and different
+        canonicalMismatch: boolean; // both canonicals set and different
         lastCrawlTime: string | null;
-        crawledAs: string | null;             // DESKTOP | MOBILE
+        crawledAs: string | null; // DESKTOP | MOBILE
         inspectedAt: string | null;
-        error: string | null;                 // per-URL failure text; state "failed"
+        error: string | null; // per-URL failure text; state "failed"
       }>;
     };
 
@@ -122,17 +136,25 @@ type IndexStatus =
 type Ga4KeyEvents =
   | { error: string }
   | {
-      capturedAt: string;                     // when GA4 was read
+      capturedAt: string; // when GA4 was read
       dateRange: { startDate: string; endDate: string }; // = the summary range
-      events: Array<{ eventName: string; keyEvents: number; previousKeyEvents: number | null }>; // organic, most first
-      landingPages: Array<{                   // organic landing pages with sessions, most key events first, max 25
-        page: string;                         // host + path, e.g. "socialboothlv.com/corporate-events"
+      events: Array<{
+        eventName: string;
+        keyEvents: number;
+        previousKeyEvents: number | null;
+      }>; // organic, most first
+      landingPages: Array<{
+        // organic landing pages with sessions, most key events first, max 25
+        page: string; // host + path, e.g. "socialboothlv.com/corporate-events"
         sessions: number;
         keyEvents: number;
-        keyEventRate: number;                 // sessionKeyEventRate, 0..1
+        keyEventRate: number; // sessionKeyEventRate, 0..1
         events: Array<{ eventName: string; keyEvents: number }>;
       }>;
-      tracking: { status: "ok" | "silent" | "no_key_events"; silentEvents: string[] };
+      tracking: {
+        status: "ok" | "silent" | "no_key_events";
+        silentEvents: string[];
+      };
       // "silent": an event had key events in the previous period and none now (tracking may be broken)
       // "no_key_events": the property has no key event with a count in either period
     };
@@ -149,40 +171,86 @@ type Ga4KeyEvents =
     "businessValueMetric": "sessionKeyEventRate",
     "totalCandidates": 14,
     "rows": [
-      { "page": "https://socialboothlv.com/corporate-events", "score": 82, "why": ["high_demand", "near_page_one"],
-        "clicks": 9, "impressions": 1840, "ctr": 0.0049, "position": 7.4, "sessions": 21, "keyEvents": 2 }
+      {
+        "page": "https://socialboothlv.com/corporate-events",
+        "score": 82,
+        "why": ["high_demand", "near_page_one"],
+        "clicks": 9,
+        "impressions": 1840,
+        "ctr": 0.0049,
+        "position": 7.4,
+        "sessions": 21,
+        "keyEvents": 2
+      }
     ]
   },
   "auditPages": {
-    "status": "completed", "auditId": "05f03a0f-…", "capturedAt": "2026-09-05T00:52:05.096Z",
-    "pagesCrawled": 100, "hasLighthouse": false, "truncated": false,
+    "status": "completed",
+    "auditId": "05f03a0f-…",
+    "capturedAt": "2026-09-05T00:52:05.096Z",
+    "pagesCrawled": 100,
+    "hasLighthouse": false,
+    "truncated": false,
     "pages": [
-      { "url": "https://socialboothlv.com/services", "statusCode": 200,
+      {
+        "url": "https://socialboothlv.com/services",
+        "statusCode": 200,
         "issueCounts": { "critical": 0, "warning": 0, "info": 2 },
-        "issues": [ { "issueType": "meta-description-too-long", "severity": "info", "occurrences": 1, "details": { "length": 192 } } ],
-        "lighthouse": null }
+        "issues": [
+          {
+            "issueType": "meta-description-too-long",
+            "severity": "info",
+            "occurrences": 1,
+            "details": { "length": 192 }
+          }
+        ],
+        "lighthouse": null
+      }
     ]
   },
   "indexStatus": {
-    "connected": true, "capturedAt": "2026-11-02T10:05:02.000Z", "nextCheckAfter": "2026-11-03T10:00:01.000Z",
+    "connected": true,
+    "capturedAt": "2026-11-02T10:05:02.000Z",
+    "nextCheckAfter": "2026-11-03T10:00:01.000Z",
     "counts": { "indexed": 17, "notIndexed": 1, "failed": 0, "pending": 1 },
     "pages": [
-      { "url": "https://socialboothlv.com/pricing", "inspectedUrl": "https://socialboothlv.com/pricing", "state": "indexed",
-        "verdict": "PASS", "coverageState": "Submitted and indexed", "indexingState": "INDEXING_ALLOWED",
-        "robotsTxtState": "ALLOWED", "pageFetchState": "SUCCESSFUL",
-        "googleCanonical": "https://socialboothlv.com/pricing", "userCanonical": "https://socialboothlv.com/pricing",
-        "canonicalMismatch": false, "lastCrawlTime": "2026-10-28T04:11:09Z", "crawledAs": "MOBILE",
-        "inspectedAt": "2026-11-02T10:05:02.000Z", "error": null }
+      {
+        "url": "https://socialboothlv.com/pricing",
+        "inspectedUrl": "https://socialboothlv.com/pricing",
+        "state": "indexed",
+        "verdict": "PASS",
+        "coverageState": "Submitted and indexed",
+        "indexingState": "INDEXING_ALLOWED",
+        "robotsTxtState": "ALLOWED",
+        "pageFetchState": "SUCCESSFUL",
+        "googleCanonical": "https://socialboothlv.com/pricing",
+        "userCanonical": "https://socialboothlv.com/pricing",
+        "canonicalMismatch": false,
+        "lastCrawlTime": "2026-10-28T04:11:09Z",
+        "crawledAs": "MOBILE",
+        "inspectedAt": "2026-11-02T10:05:02.000Z",
+        "error": null
+      }
     ]
   },
   "ga4": {
-    "connected": true, "totals": { "…": "unchanged" },
+    "connected": true,
+    "totals": { "…": "unchanged" },
     "keyEvents": {
       "capturedAt": "2026-11-02T18:04:11.000Z",
       "dateRange": { "startDate": "2026-10-03", "endDate": "2026-10-30" },
-      "events": [ { "eventName": "generate_lead", "keyEvents": 5, "previousKeyEvents": 0 } ],
-      "landingPages": [ { "page": "socialboothlv.com/corporate-events", "sessions": 21, "keyEvents": 2, "keyEventRate": 0.095,
-                          "events": [ { "eventName": "generate_lead", "keyEvents": 2 } ] } ],
+      "events": [
+        { "eventName": "generate_lead", "keyEvents": 5, "previousKeyEvents": 0 }
+      ],
+      "landingPages": [
+        {
+          "page": "socialboothlv.com/corporate-events",
+          "sessions": 21,
+          "keyEvents": 2,
+          "keyEventRate": 0.095,
+          "events": [{ "eventName": "generate_lead", "keyEvents": 2 }]
+        }
+      ],
       "tracking": { "status": "ok", "silentEvents": [] }
     }
   }
@@ -250,13 +318,13 @@ and leaves the rest of `ga4` intact.
 
 ## Cost per month
 
-| Item | Calls | Money |
-|---|---|---|
-| URL Inspection | ≤ 1 per key page per day (~140/day across 9 projects; quota 2,000/day per property) | $0 |
-| Opportunities | ≤ 4 GSC/GA4 calls per project per 6 h, only when the summary is read | $0 |
-| Key events | 3 GA4 calls per summary cache miss (15 min Workers Cache, 10 min admin cache) | $0 |
-| Audit pages | D1 reads | $0 |
-| DataForSEO | none | $0 |
+| Item           | Calls                                                                               | Money |
+| -------------- | ----------------------------------------------------------------------------------- | ----- |
+| URL Inspection | ≤ 1 per key page per day (~140/day across 9 projects; quota 2,000/day per property) | $0    |
+| Opportunities  | ≤ 4 GSC/GA4 calls per project per 6 h, only when the summary is read                | $0    |
+| Key events     | 3 GA4 calls per summary cache miss (15 min Workers Cache, 10 min admin cache)       | $0    |
+| Audit pages    | D1 reads                                                                            | $0    |
+| DataForSEO     | none                                                                                | $0    |
 
 ## Test plan
 
