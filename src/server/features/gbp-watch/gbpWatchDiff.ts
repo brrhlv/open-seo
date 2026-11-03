@@ -1,3 +1,4 @@
+import { sort } from "remeda";
 import {
   GBP_WATCHED_FIELDS,
   GBP_WEEKDAYS,
@@ -58,16 +59,59 @@ function sameCategories(a: string[], b: string[]): boolean {
   return left.size === right.size && [...left].every((c) => right.has(c));
 }
 
-/** Lowercased, one trailing slash dropped. The scheme is kept on purpose. */
+/**
+ * Scheme and host lowercased (URL does that), path case kept, one trailing
+ * slash dropped and utm_* parameters ignored. The scheme is compared on
+ * purpose: http vs https is what the June audit fixed.
+ */
 function websiteKey(url: string | null): string | null {
-  return url ? url.trim().toLowerCase().replace(/\/+$/, "") : null;
+  const raw = url?.trim();
+  if (!raw) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return raw.replace(/\/$/, "");
+  }
+  // Copy the keys first: deleting while iterating the live list skips entries.
+  for (const key of Array.from(parsed.searchParams.keys())) {
+    if (key.toLowerCase().startsWith("utm_")) parsed.searchParams.delete(key);
+  }
+  const path = parsed.pathname.replace(/\/$/, "");
+  return `${parsed.protocol}//${parsed.host}${path}${parsed.search}${parsed.hash}`;
 }
+
+const byText = (a: string, b: string) => a.localeCompare(b);
+const sortedSpans = (hours: GbpHours, day: Weekday) =>
+  sort(hours[day] ?? [], byText).join(",");
 
 function sameHours(a: GbpHours | null, b: GbpHours | null): boolean {
   if (a === null || b === null) return a === b;
   return GBP_WEEKDAYS.every(
-    (day) => (a[day] ?? []).join(",") === (b[day] ?? []).join(","),
+    (day) => sortedSpans(a, day) === sortedSpans(b, day),
   );
+}
+
+/**
+ * DataForSEO sometimes leaves out work_time, is_claimed or
+ * additional_categories for a profile that has them. A value that goes from
+ * set to missing is therefore kept from the previous snapshot (and stored),
+ * so it is never reported as a change one week and back the next. A real
+ * new value always wins.
+ */
+export function carryForwardOmitted(
+  previous: GbpProfile,
+  next: GbpProfile,
+): GbpProfile {
+  return {
+    ...next,
+    hours: next.hours ?? previous.hours,
+    isClaimed: next.isClaimed ?? previous.isClaimed,
+    additionalCategories:
+      next.additionalCategories.length > 0
+        ? next.additionalCategories
+        : previous.additionalCategories,
+  };
 }
 
 type FieldRule = {

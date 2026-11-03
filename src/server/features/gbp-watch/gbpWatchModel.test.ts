@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import profileFixture from "./__fixtures__/sblv-profile.json";
 import reviewsFixture from "./__fixtures__/sblv-reviews.json";
 import {
+  carryForwardOmitted,
   diffProfiles,
   driftFromExpected,
   formatHoursText,
@@ -45,6 +46,11 @@ const SBLV_EXPECTED: GbpExpected = {
   hours: EVERY_DAY,
 };
 
+const span = (open: number, close: number) => ({
+  open: { hour: open, minute: 0 },
+  close: { hour: close, minute: 0 },
+});
+
 function profile(overrides: Partial<GbpProfile> = {}): GbpProfile {
   return { ...live, ...overrides };
 }
@@ -87,6 +93,17 @@ describe("normalizeProfile", () => {
     }).hours;
     expect(hours?.monday).toEqual(["09:00-17:30"]);
     expect(hours?.sunday).toEqual([]);
+  });
+
+  it("sorts a day's time slots", () => {
+    const hours = normalizeProfile({
+      work_time: {
+        work_hours: {
+          timetable: { monday: [span(17, 21), span(9, 12)] },
+        },
+      },
+    }).hours;
+    expect(hours?.monday).toEqual(["09:00-12:00", "17:00-21:00"]);
   });
 });
 
@@ -132,6 +149,19 @@ describe("driftFromExpected", () => {
       ["website", "http://socialboothlv.com"],
       ["hours", "Mon–Sat 09:00–21:00, Sun closed"],
     ]);
+  });
+
+  it("compares websites by scheme, host and path, ignoring utm_* and one trailing slash", () => {
+    const site = (website: string) =>
+      driftFromExpected(profile({ website }), {
+        website: "https://socialboothlv.com/Book",
+      }).length;
+    expect(
+      site("https://SOCIALBOOTHLV.com/Book/?utm_source=gbp&utm_medium=organic"),
+    ).toBe(0);
+    expect(site("https://socialboothlv.com/book")).toBe(1);
+    expect(site("http://socialboothlv.com/Book")).toBe(1);
+    expect(site("https://socialboothlv.com/Book?ref=gbp")).toBe(1);
   });
 
   it("matches categories without case and ignores one trailing slash", () => {
@@ -209,6 +239,33 @@ describe("diffProfiles", () => {
         at,
       ),
     ).toEqual([]);
+  });
+});
+
+describe("carryForwardOmitted", () => {
+  const at = "2026-11-09T14:00:00.000Z";
+
+  it("keeps the last hours, claim status and categories when DataForSEO omits them", () => {
+    const omitted = profile({
+      hours: null,
+      isClaimed: null,
+      additionalCategories: [],
+    });
+    const carried = carryForwardOmitted(live, omitted);
+    expect(carried).toMatchObject({
+      hours: EVERY_DAY,
+      isClaimed: true,
+      additionalCategories: live.additionalCategories,
+    });
+    expect(diffProfiles(live, carried, at)).toEqual([]);
+  });
+
+  it("keeps a real new value", () => {
+    const next = profile({
+      hours: { ...EVERY_DAY, sunday: [] },
+      isClaimed: false,
+    });
+    expect(carryForwardOmitted(live, next)).toEqual(next);
   });
 });
 

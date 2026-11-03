@@ -1,3 +1,4 @@
+import { sort } from "remeda";
 import { z } from "zod";
 import { readPath } from "@/server/mcp/table";
 
@@ -170,11 +171,13 @@ function normalizeHours(workTime: unknown): GbpHours | null {
   if (typeof timetable !== "object" || timetable === null) return null;
   const day = (name: Weekday) => {
     const list = readPath(timetable, name);
-    return (Array.isArray(list) ? list : []).flatMap((span) => {
+    // "HH:MM-HH:MM" sorts as text; Google's span order is not stable.
+    const slots = (Array.isArray(list) ? list : []).flatMap((span) => {
       const open = clock(span, "open");
       const close = clock(span, "close");
       return open && close ? [`${open}-${close}`] : [];
     });
+    return sort(slots, (a, b) => a.localeCompare(b));
   };
   return {
     monday: day("monday"),
