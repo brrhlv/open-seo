@@ -29,6 +29,12 @@ const classifySerpError = createDataforseoBillingClassifier({
     "The connected DataForSEO account has a billing or balance issue",
 });
 
+/**
+ * ChatGPT scraper live answers took 14–105 s on 2026-11-02, past the shared
+ * 60 s budget. An aborted call is still billed, so it gets its own ceiling.
+ */
+export const CHATGPT_SCRAPER_TIMEOUT_MS = 150_000;
+
 type PromptInput = {
   prompt: string;
   locationCode: number;
@@ -39,8 +45,9 @@ async function postLive(
   path: string,
   body: Record<string, unknown>,
   classify: typeof classifyAiError,
+  options: { signal?: AbortSignal; maxServerErrorRetries?: number } = {},
 ): Promise<DataforseoApiResponse<Record<string, unknown>>> {
-  const response = await dataforseoPost(path, [body], { classify });
+  const response = await dataforseoPost(path, [body], { classify, ...options });
   const task = assertOk(response, { classify, classifyPath: path });
   const result = task.result?.[0];
   if (!isRecord(result)) {
@@ -62,6 +69,11 @@ export function fetchChatGptScraperAnswer(input: PromptInput) {
       language_code: input.languageCode,
     },
     classifyAiError,
+    // Billed per live result: a 5xx replay could pay twice.
+    {
+      signal: AbortSignal.timeout(CHATGPT_SCRAPER_TIMEOUT_MS),
+      maxServerErrorRetries: 0,
+    },
   );
 }
 
