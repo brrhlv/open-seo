@@ -1,3 +1,4 @@
+import { sort } from "remeda";
 import { z } from "zod";
 import { AI_VISIBILITY_PROMPT_PLATFORMS } from "@/db/ai-visibility.schema";
 import {
@@ -40,7 +41,7 @@ export const addAiVisibilityPromptsTool = {
   name: "add_ai_visibility_prompts",
   config: {
     title: "Add AI visibility buyer prompts",
-    description: `Track buyer prompts for the project. Once a month each prompt is asked of ChatGPT, Google AI Mode and Perplexity; the result records whether the brand is named, its position among the brands named, the cited page and the competitors named. New prompts run on the next cron tick (within about 10 minutes) and then monthly, about $${perPrompt} per prompt per month on all three platforms. Show the user that cost before adding. At most ${MAX_ACTIVE_PROMPTS} active prompts per project; re-adding a removed prompt reactivates it with its history. Needs an AI visibility tracker (create_ai_visibility_tracker) on a monthly schedule.`,
+    description: `Track buyer prompts for the project. Once a month each prompt is asked of ChatGPT, Google AI Mode and Perplexity; the result records whether the brand is named, its position among the brands named, the cited page and the competitors named. New and re-added prompts run on the next monthly check (the 1st, before the monthly report), never mid-month, then every month: about $${perPrompt} per prompt per month on all three platforms. Show the user that cost before adding. To get answers sooner, call run_ai_visibility_prompts explicitly (it spends the same amount now). At most ${MAX_ACTIVE_PROMPTS} active prompts per project; re-adding a removed prompt reactivates it with its history. Needs an AI visibility tracker (create_ai_visibility_tracker) on a monthly schedule.`,
     inputSchema,
     outputSchema: z
       .object({
@@ -64,9 +65,14 @@ export const addAiVisibilityPromptsTool = {
       platforms: args.platforms,
     });
     const scheduled = result.added + result.reactivated;
+    const firstRun =
+      sort(
+        result.prompts.flatMap((p) => (p.nextRunAt ? [p.nextRunAt] : [])),
+        (a, b) => a.localeCompare(b),
+      )[0]?.slice(0, 10) ?? "the 1st";
     const next =
       scheduled > 0
-        ? `${scheduled} prompt${scheduled === 1 ? "" : "s"} will run on the next cron tick (about $${(scheduled * ESTIMATED_PROMPT_RUN_COST_USD).toFixed(3)}), then monthly.`
+        ? `${scheduled} prompt${scheduled === 1 ? "" : "s"} will run on the next monthly check (${firstRun}, before the monthly report; about $${(scheduled * ESTIMATED_PROMPT_RUN_COST_USD).toFixed(3)}), then monthly. Use run_ai_visibility_prompts to run them now.`
         : "Nothing new to run.";
     const total = result.prompts.length;
     return mcpResponse({

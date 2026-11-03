@@ -58,6 +58,9 @@ describe("AI visibility buyer prompt MCP tools", () => {
   });
 
   it("add and run state the per-prompt cost up front", async () => {
+    expect(addAiVisibilityPromptsTool.config.description).toContain(
+      "run on the next monthly check (the 1st, before the monthly report), never mid-month",
+    );
     expect(addAiVisibilityPromptsTool.config.description).toMatch(
       /about \$0\.015 per prompt per month/,
     );
@@ -68,14 +71,17 @@ describe("AI visibility buyer prompt MCP tools", () => {
       added: 2,
       reactivated: 0,
       unchanged: 0,
-      prompts: [{ id: "a" }, { id: "b" }],
+      prompts: [
+        { id: "a", nextRunAt: "2026-12-01T06:00:00.000Z" },
+        { id: "b", nextRunAt: "2026-12-01T06:00:00.000Z" },
+      ],
     });
     const args = z
       .object(addAiVisibilityPromptsTool.config.inputSchema)
       .parse({ projectId, prompts: ["one prompt", "two prompt"] });
     const result = await addAiVisibilityPromptsTool.handler(args, toolContext);
     expect(textContent(result)).toContain(
-      "2 prompts will run on the next cron tick (about $0.030)",
+      "2 prompts will run on the next monthly check (2026-12-01, before the monthly report; about $0.030)",
     );
   });
 

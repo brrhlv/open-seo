@@ -40,6 +40,8 @@ Market: US (`location_code` 2840, `en`), the same as PAI-217. The prompts name L
 
 Estimates used for timed-out calls and tool descriptions: $0.004, $0.004 and $0.007 (sonar at the 1,024-token output cap), so $0.015 per prompt.
 
+**Normal month: one run.** Prompts run only with the monthly AI-visibility check on the 1st (Bryan, 2026-11-03), so a normal month is one run of every active prompt: **about $0.11 for SBLV** (8 prompts), at most $0.15 for a project with 10 prompts. An explicit `run_ai_visibility_prompts` adds one more run's cost.
+
 **Worst-case bound per project per month: $0.45.** Every run (cron, retry, "run now", `force`) counts an attempt, and a platform gets at most 3 attempts a month. At most 10 distinct prompts can run per project per month, however often prompts are removed and added. So the most that can be billed is 10 prompts × 3 attempts × $0.015 = $0.45, even if every call times out or fails after billing. A separate hard stop refuses or defers runs once the month's recorded spend reaches **$1.00** (`MONTHLY_PROMPT_COST_CAP_USD`), which is above the bound and only matters if the prices change.
 
 Fixture run 2026-11-02: 23 calls cost $0.1077 (7 ChatGPT, 8 AI Mode, 8 Perplexity). ChatGPT prompt 1 was reused from SBLV-188 (`$0.004`).
@@ -140,7 +142,7 @@ The prompt phase runs inside `runScheduledAiVisibilityChecks`, on the existing `
 - **Monthly limits (checked before the lease):** spend this month ≥ $1.00 → defer (`cost_cap`); a prompt that hasn't run this month while 10 others already have → defer (`monthly_prompt_limit`). Deferred prompts move to next month.
 - **Run:** ask each configured platform that has no `ok` row this month (all of them with `force`) and fewer than 3 attempts this month. Every call, success or failure, adds an attempt. A failure never replaces an `ok` row; it only adds its cost. A timed-out call is recorded at the estimated price above, since DataForSEO bills it without returning a cost.
 - **Finish:** `next_run_at = now + 6 h` if a platform failed and has an attempt left, otherwise the next 1st at 06:00 UTC. If the whole run throws, every open platform gets an error row (an attempt), so the same 3-attempt cap stops retries.
-- **New and re-added prompts:** `add` sets `next_run_at = now`. Re-adding a removed prompt keeps its result rows, so its attempts this month still count. The seed SQL only reactivates on conflict and leaves `next_run_at` alone.
+- **New and re-added prompts:** never run mid-month on their own. `add` and reactivation set `next_run_at` to the project's next monthly AI-visibility check: the tracker's `next_check_at` while it sits on a 1st (it may be today), otherwise 06:00 UTC on the next 1st (no monthly tracker, or the tracker is in a mid-month retry). They then run on the first tick of that day with no tracker due, right after the mentions check and before the 4th's monthly report. `run_ai_visibility_prompts` is the explicit way to run them sooner. Re-adding a removed prompt keeps its result rows, so its attempts this month still count. The seed SQL sets the same aligned date and, on conflict, only reactivates.
 
 ## API contract: `aiVisibility.prompts`
 
@@ -229,15 +231,15 @@ Example (SBLV, after the first run):
 
 ## MCP tools
 
-| Tool                               | Spends                                                                               | Input                                                                                 | Output                                                         |
-| ---------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `add_ai_visibility_prompts`        | Schedules about $0.015 per new prompt, which the cron spends within about 10 minutes | `projectId`, `prompts: string[1..10]`, `platforms?: PromptPlatform[]` (default all 3) | `{ added, reactivated, unchanged, prompts[] }`                 |
-| `list_ai_visibility_prompts`       | No                                                                                   | `projectId`, `includeInactive?`                                                       | `{ prompts[] }` with schedule fields                           |
-| `remove_ai_visibility_prompts`     | No                                                                                   | `projectId`, `promptIds: string[1..20]`                                               | `{ removed }` (deactivated, history kept)                      |
-| `run_ai_visibility_prompts`        | Yes, ~$0.015 per prompt; refused at the $1.00 monthly cap                            | `projectId`, `promptIds?` (default all active), `force?`                              | `{ period, costUsd, outcomes[], skipped[{promptId, reason}] }` |
-| `get_ai_visibility_prompt_results` | No                                                                                   | `projectId`                                                                           | The `AiVisibilityPrompts` object above, plus a text table      |
+| Tool                               | Spends                                                                                            | Input                                                                                 | Output                                                         |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `add_ai_visibility_prompts`        | No. Prompts run on the next monthly check (the 1st, before the monthly report), about $0.015 each | `projectId`, `prompts: string[1..10]`, `platforms?: PromptPlatform[]` (default all 3) | `{ added, reactivated, unchanged, prompts[] }`                 |
+| `list_ai_visibility_prompts`       | No                                                                                                | `projectId`, `includeInactive?`                                                       | `{ prompts[] }` with schedule fields                           |
+| `remove_ai_visibility_prompts`     | No                                                                                                | `projectId`, `promptIds: string[1..20]`                                               | `{ removed }` (deactivated, history kept)                      |
+| `run_ai_visibility_prompts`        | Yes, ~$0.015 per prompt; refused at the $1.00 monthly cap                                         | `projectId`, `promptIds?` (default all active), `force?`                              | `{ period, costUsd, outcomes[], skipped[{promptId, reason}] }` |
+| `get_ai_visibility_prompt_results` | No                                                                                                | `projectId`                                                                           | The `AiVisibilityPrompts` object above, plus a text table      |
 
-`run` goes through the guards above (lease, 3 attempts per platform a month, 10 prompts a month, $1.00 cap), two prompts at a time. It skips platforms that already have an `ok` row this month unless `force` is set, and refuses when the project has no AI visibility tracker or the month is at the cap.
+`run` goes through the guards above (lease, 3 attempts per platform a month, 10 prompts a month, $1.00 cap), two prompts at a time. It skips platforms that already have an `ok` row this month unless `force` is set, and refuses when the project has no AI visibility tracker or the month is at the cap. It is the only way to run prompts outside the monthly check.
 
 ## UI (fork app)
 
@@ -246,8 +248,8 @@ Out of scope here. The admin is the consumer. `AvailableTools.tsx` lists the fiv
 ## Tests
 
 - `promptAnswers.test.ts`: real fixtures (trimmed) for each platform. ChatGPT prompt 1 gives SBLV #1 of 5, cited `/corporate-events`, BoothMeUp #2. AI Mode prompt 1 gives SBLV #1 of 4 (the Shutterbox link counts in brands named, not position), with a Google Maps link ignored. Perplexity prompt 8: zola.com and america.imexevents.com don't push SBLV down. Registrable-domain stems. A keyword-domain competitor (`lasvegasphotobooth.com`) never matches the phrase, only its link; `photoboothrentallasvegasnv.com` matches by link or by its stored name. Name-window edge cases and `utm` stripping.
-- `AiVisibilityPromptService.test.ts` (real SQL over the shipped migrations): add normalizes, dedupes, reactivates and caps at 10; run writes ok and error rows; a timed-out call is billed at its estimate; 3 attempts per platform a month, force and re-adding included; concurrent "run now" calls run a prompt once; at most two prompts in flight; refused at the $1.00 cap; remove + add can't pass 10 prompts a month; results pick latest and previous per platform plus `schedule`.
-- `scheduledPromptChecks.test.ts`: the prompt phase waits while a tracker is due; runs and reschedules monthly; retries after 6 h up to 3 attempts; waits when the tick is past 60 s; a run that throws counts an attempt on every open platform; manual trackers are skipped.
+- `AiVisibilityPromptService.test.ts` (real SQL over the shipped migrations): add normalizes, dedupes, reactivates and caps at 10; added and reactivated prompts get the tracker's next monthly check, or the next 1st without one or during a mid-month retry; run writes ok and error rows; a timed-out call is billed at its estimate; 3 attempts per platform a month, force and re-adding included; concurrent "run now" calls run a prompt once; at most two prompts in flight; refused at the $1.00 cap; remove + add can't pass 10 prompts a month; results pick latest and previous per platform plus `schedule`.
+- `scheduledPromptChecks.test.ts`: added and reactivated prompts wait through mid-month ticks and run in the monthly tick after the mentions check; the prompt phase waits while a tracker is due; runs and reschedules monthly; retries after 6 h up to 3 attempts; waits when the tick is past 60 s; a run that throws counts an attempt on every open platform; manual trackers are skipped.
 - `ai-prompts.test.ts`: the ChatGPT fetcher passes its own 150 s signal and no 5xx replay; AI Mode keeps the default.
 - `aiVisibilityPrompts.test.ts` (summary section): shape, `{error}` isolation.
 - MCP tool tests; `schema-parity.test.ts` covers both tables.
@@ -256,7 +258,7 @@ Out of scope here. The admin is the consumer. `AvailableTools.tsx` lists the fiv
 
 1. The coordinator merges the branch (migration last; renumber if needed) and deploys with the chained alchemy command from `reference_openseo_setup.md`.
 2. Apply the D1 migration `0046_ai_visibility_prompts.sql`.
-3. Seed SBLV: review `scripts/seed-sblv-buyer-prompts.sql`, then run it through the D1 API. It inserts 8 prompts with `next_run_at = now`; re-running it only reactivates them. Alternatively, call `add_ai_visibility_prompts` with the same 8 prompts.
-4. First run: the `*/5` cron baselines them within about 20 minutes (4 ticks). Or call `run_ai_visibility_prompts` for an immediate run of about $0.11 (bounded at $0.45 a month per project).
+3. Seed SBLV: review `scripts/seed-sblv-buyer-prompts.sql`, then run it through the D1 API. It inserts 8 prompts due on SBLV's next monthly check (2026-12-01 06:00 UTC); re-running it only reactivates them. Alternatively, call `add_ai_visibility_prompts` with the same 8 prompts.
+4. First run: the 2026-12-01 monthly tick, after the mentions check (about 20 minutes, 4 ticks), so the 2026-12-04 report has them. For a baseline before then, call `run_ai_visibility_prompts` once (about $0.11; bounded at $0.45 a month per project).
 5. Verify `GET /api/public/v1/projects/c65ed7c9-…/summary` returns `aiVisibility.prompts.items` with 8 entries and up to 3 results each. Log `SUM(cost_usd)` in PAI-255.
 6. Monthly from 2026-12-01 06:00 UTC, after the mentions phase drains.
