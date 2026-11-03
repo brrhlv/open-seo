@@ -337,6 +337,13 @@
       "when": 1793746044280,
       "tag": "0047_local_grid",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1793746208597,
+      "tag": "0048_gbp_watch",
+      "breakpoints": true
     }
   ]
 }
