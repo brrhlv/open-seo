@@ -1,6 +1,7 @@
 import { getAuth } from "@/lib/auth";
 import { GSC_OAUTH_PROVIDER_ID } from "@/shared/gsc";
 import { GscApiError, GscTokenError } from "./gscErrors";
+import { scopedAccessToken } from "./sharedAccessTokens";
 
 export { GscApiError, GscTokenError } from "./gscErrors";
 
@@ -84,7 +85,15 @@ export function createGscClient(opts: {
   userId: string;
   gscAccountId?: string;
 }) {
-  async function getToken(): Promise<string> {
+  // One mint per grant inside a shared-token scope (CLIENT-SBLV-194).
+  function getToken(): Promise<string> {
+    return scopedAccessToken(
+      `gsc:${opts.userId}:${opts.gscAccountId ?? ""}`,
+      mintToken,
+    );
+  }
+
+  async function mintToken(): Promise<string> {
     let result: { accessToken?: string } | undefined;
     try {
       // Headerless call: getAccessToken trusts body.userId when no request

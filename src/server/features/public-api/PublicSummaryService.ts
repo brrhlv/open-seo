@@ -18,7 +18,6 @@ import { summarizeRankResults } from "@/server/features/rank-tracking/services/r
 import { getLatestResults } from "@/server/features/rank-tracking/services/rankTrackingResults";
 import { Ga4ReportError } from "@/server/lib/ga4Errors";
 import {
-  GscApiError,
   GscNotConnectedError,
   isExpectedGrantFailure,
 } from "@/server/lib/gscErrors";
@@ -29,6 +28,12 @@ import {
 } from "./publicSummaryRange";
 import { getSavedKeywordsSection } from "./sections/savedKeywords";
 import { toIsoTimestamp } from "./timestamps";
+// CLIENT-SBLV-194: summary v2 sections, one module each.
+import { getAuditPagesSection } from "./sections/auditPages";
+import { getGa4KeyEventsSection } from "./sections/ga4KeyEvents";
+import { getIndexStatusSection } from "./sections/indexStatus";
+import { getOpportunitiesSection } from "./sections/opportunities";
+import { sectionErrorCode } from "./sections/sectionErrorCode";
 
 // Read-only project summary for external dashboards (PAI-222). Every read is
 // D1 or first-party Google data — never a DataForSEO-metered path (no
@@ -115,16 +120,6 @@ function splitSourceMedium(value: string): { source: string; medium: string } {
   return separator < 0
     ? { source: value, medium: "" }
     : { source: value.slice(0, separator), medium: value.slice(separator + 3) };
-}
-
-function sectionErrorCode(error: unknown): string {
-  if (error instanceof Ga4ReportError) return error.code;
-  if (error instanceof GscApiError) {
-    return error.status === 429
-      ? "gsc_quota_exhausted"
-      : "gsc_upstream_unavailable";
-  }
-  return "internal_error";
 }
 
 function unwrap<T>(
@@ -324,7 +319,18 @@ async function getGsc(projectId: string, dates: SummaryDates) {
   }
 }
 
-async function getGa4(projectId: string, dates: SummaryDates) {
+async function getGa4(projectId: string, dates: SummaryDates, now: Date) {
+  // Settles on its own: a key-events failure is ga4.keyEvents = { error }.
+  // Unlinked is not logged; the overview already answers connected:false.
+  const keyEvents = Promise.allSettled([
+    getGa4KeyEventsSection(projectId, dates, now),
+  ]).then(([result]) =>
+    result.status === "rejected" &&
+    result.reason instanceof Ga4ReportError &&
+    result.reason.code === "ga4_not_connected"
+      ? { error: "ga4_not_connected" }
+      : unwrap("ga4.keyEvents", projectId, result),
+  );
   try {
     const [overview, sources] = await Promise.all([
       // Organic Search only (the SEO lens).
@@ -360,6 +366,7 @@ async function getGa4(projectId: string, dates: SummaryDates) {
         ...splitSourceMedium(String(row.sessionSourceMedium ?? "")),
         sessions: metric(row.sessions),
       })),
+      keyEvents: await keyEvents,
     };
   } catch (error) {
     if (error instanceof Ga4ReportError && error.code === "ga4_not_connected") {
@@ -382,16 +389,23 @@ async function getSummary(input: {
   const now = input.now ?? new Date();
   const dates = resolvePublicSummaryDates(input.range, now);
 
+  // Started first so they run beside the sections below, not after them.
+  const v2Sections = Promise.allSettled([
+    getOpportunitiesSection(project.id, now),
+    getAuditPagesSection(project.id, now),
+    getIndexStatusSection(project.id),
+  ]);
   const [rankings, backlinks, audit, gsc, ga4, aiVisibility, savedKeywords] =
     await Promise.allSettled([
       getRankings(project.id, input.range),
       getBacklinks(project.id, project.domain),
       getAudit(project.id),
       getGsc(project.id, dates),
-      getGa4(project.id, dates),
+      getGa4(project.id, dates, now),
       getAiVisibility(project.id),
       getSavedKeywordsSection(project.id),
     ]);
+  const [opportunities, auditPages, indexStatus] = await v2Sections;
 
   return {
     project: { id: project.id, domain: project.domain },
@@ -404,6 +418,9 @@ async function getSummary(input: {
     ga4: unwrap("ga4", project.id, ga4),
     aiVisibility: unwrap("aiVisibility", project.id, aiVisibility),
     savedKeywords: unwrap("savedKeywords", project.id, savedKeywords),
+    opportunities: unwrap("opportunities", project.id, opportunities),
+    auditPages: unwrap("auditPages", project.id, auditPages),
+    indexStatus: unwrap("indexStatus", project.id, indexStatus),
   };
 }
 

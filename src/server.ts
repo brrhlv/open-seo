@@ -8,6 +8,7 @@ import { ProjectRepository } from "@/server/features/projects/repositories/Proje
 import { SamSessionRepository } from "@/server/features/sam/SamSessionRepository";
 import { runScheduledRankChecks } from "@/server/features/rank-tracking/services/scheduledRankChecks";
 import { runScheduledAiVisibilityChecks } from "@/server/features/ai-visibility/services/scheduledAiVisibilityChecks";
+import { runScheduledIndexInspections } from "@/server/features/gsc/services/scheduledIndexInspections";
 import { reconcileStaleAudits } from "@/server/features/audit/services/auditReconciler";
 import { getOrCreateOrganizationCustomer } from "@/server/billing/subscription";
 import { isHostedServerAuthMode } from "@/server/lib/runtime-env";
@@ -246,6 +247,12 @@ export default {
       await withPgClient(() => runScheduledAiVisibilityChecks());
     } catch (err) {
       console.error("[cron] AI visibility checks failed:", err);
+    }
+    // CLIENT-SBLV-194: key-page URL Inspection, at most daily per URL.
+    try {
+      await withPgClient(() => runScheduledIndexInspections());
+    } catch (err) {
+      console.error("[cron] Index inspections failed:", err);
     }
     if (watchdogError) throw watchdogError;
   },

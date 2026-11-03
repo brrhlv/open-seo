@@ -4,6 +4,7 @@ import {
   resolvePublicSummaryDates,
 } from "./publicSummaryRange";
 import { PublicSummaryService } from "./PublicSummaryService";
+import { withSharedAccessTokens } from "@/server/lib/sharedAccessTokens";
 
 // The consumer caches on its side; never let an intermediary store a
 // key-authenticated response.
@@ -90,10 +91,10 @@ export async function handlePublicSummaryRequest(input: {
   }
 
   try {
-    const summary = await PublicSummaryService.getSummary({
-      projectId: input.projectId,
-      range,
-    });
+    // One Google token per grant for every section (CLIENT-SBLV-194).
+    const summary = await withSharedAccessTokens(() =>
+      PublicSummaryService.getSummary({ projectId: input.projectId, range }),
+    );
     if (!summary) return json({ error: "not_found" }, 404);
 
     // Only cache when every section resolved cleanly (transient errors retry).
