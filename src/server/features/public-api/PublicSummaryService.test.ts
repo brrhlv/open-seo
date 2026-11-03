@@ -197,6 +197,39 @@ describe("PublicSummaryService.getSummary", () => {
     });
   });
 
+  it("keeps every existing key and only adds the v2 ones (consumers depend on them)", async () => {
+    mocks.getOrganicOverview.mockResolvedValue({
+      current: null,
+      previous: null,
+      trend: [],
+    });
+    mocks.runReport.mockResolvedValue({ rows: [] });
+    mocks.getGa4KeyEventsSection.mockResolvedValue({ events: [] });
+    const summary = await PublicSummaryService.getSummary(input);
+    expect(Object.keys(summary ?? {})).toEqual([
+      "project",
+      "generatedAt",
+      "range",
+      "rankings",
+      "backlinks",
+      "audit",
+      "gsc",
+      "ga4",
+      "aiVisibility",
+      "opportunities",
+      "auditPages",
+      "indexStatus",
+    ]);
+    expect(Object.keys(summary?.ga4 ?? {})).toEqual([
+      "connected",
+      "totals",
+      "prevTotals",
+      "daily",
+      "sources",
+      "keyEvents",
+    ]);
+  });
+
   it("adds the v2 sections, each failing on its own", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.getOpportunitiesSection.mockRejectedValue(
