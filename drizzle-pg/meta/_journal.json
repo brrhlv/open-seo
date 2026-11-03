@@ -169,6 +169,13 @@
       "when": 1791532876416,
       "tag": "0023_ai_visibility",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793699373064,
+      "tag": "0024_local_grid",
+      "breakpoints": true
     }
   ]
 }
