@@ -151,7 +151,7 @@ const run = (now: Date, extra: { force?: boolean } = {}) =>
   });
 
 describe("AiVisibilityPromptService prompts", () => {
-  it("adds normalized, deduped prompts due now and reactivates a removed one", async () => {
+  it("adds normalized, deduped prompts that wait for the monthly check, and reactivates a removed one", async () => {
     const first = await service().addPrompts({
       projectId: PROJECT,
       prompts: [
@@ -168,7 +168,8 @@ describe("AiVisibilityPromptService prompts", () => {
     ]);
     expect(first.prompts[0]).toMatchObject({
       platforms: ["chat_gpt", "google_ai_mode", "perplexity"],
-      nextRunAt: NOV.toISOString(),
+      // The tracker's next monthly check, not now (Bryan, 2026-11-03).
+      nextRunAt: "2026-12-01T06:00:00.000Z",
     });
 
     const id = first.prompts[0]?.id ?? "";
@@ -184,8 +185,28 @@ describe("AiVisibilityPromptService prompts", () => {
     expect(again).toMatchObject({ added: 0, reactivated: 1 });
     expect(again.prompts.find((p) => p.id === id)).toMatchObject({
       platforms: ["chat_gpt"],
-      nextRunAt: DEC.toISOString(),
+      // Reactivated on the 1st: joins that day's monthly run.
+      nextRunAt: "2026-12-01T06:00:00.000Z",
     });
+  });
+
+  it("without a monthly tracker, or during its mid-month retry, waits for the next 1st", async () => {
+    await client.execute(
+      "UPDATE ai_visibility_configs SET next_check_at = '2026-11-03T13:00:00.000Z'",
+    );
+    const retrying = await service().addPrompts({
+      projectId: PROJECT,
+      prompts: ["first prompt"],
+      now: NOV,
+    });
+    expect(retrying.prompts[0]?.nextRunAt).toBe("2026-12-01T06:00:00.000Z");
+    await client.execute("DELETE FROM ai_visibility_configs");
+    const none = await service().addPrompts({
+      projectId: PROJECT,
+      prompts: ["second prompt"],
+      now: NOV,
+    });
+    expect(none.prompts[1]?.nextRunAt).toBe("2026-12-01T06:00:00.000Z");
   });
 
   it("caps a project at 10 active prompts", async () => {

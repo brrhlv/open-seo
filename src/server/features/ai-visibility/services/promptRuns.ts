@@ -69,6 +69,25 @@ function nextMonthlyRunAt(now: Date): string {
   ).toISOString();
 }
 
+/**
+ * When a new or reactivated prompt first runs: with the project's next
+ * monthly AI-visibility check (the 1st, before the 4th's monthly report),
+ * never mid-month (Bryan, 2026-11-03). That is the tracker's own
+ * next_check_at while it sits on a 1st (it may already be due on the 1st
+ * itself); otherwise, e.g. during a tracker's mid-month retry, the next 1st.
+ */
+export function nextScheduledRunAt(
+  tracker: { nextCheckAt: string | null } | null,
+  now: Date,
+): string {
+  const anchor = tracker?.nextCheckAt;
+  return anchor &&
+    /^\d{4}-\d{2}-01T/.test(anchor) &&
+    anchor <= nextMonthlyRunAt(now)
+    ? anchor
+    : nextMonthlyRunAt(now);
+}
+
 async function fetchAnswer(
   platform: PromptPlatform,
   prompt: string,

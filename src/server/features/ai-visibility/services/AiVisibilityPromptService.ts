@@ -10,6 +10,7 @@ import {
 import type { PromptPlatform } from "@/server/features/ai-visibility/services/promptAnswers";
 import {
   MONTHLY_PROMPT_COST_CAP_USD,
+  nextScheduledRunAt,
   periodOf,
   runPromptsGuarded,
   type BrandContext,
@@ -64,9 +65,10 @@ async function listPrompts(
 
 /**
  * Adds prompts (trimmed, whitespace collapsed, deduped). An inactive prompt
- * with the same text is reactivated. New and reactivated prompts are due now,
- * so the next cron tick baselines them; prompts already active keep their
- * schedule and only take the new platform list when one is given.
+ * with the same text is reactivated. New and reactivated prompts wait for the
+ * project's next monthly AI-visibility check (the 1st), never mid-month;
+ * run_ai_visibility_prompts is the explicit way to run them sooner. Prompts
+ * already active keep their schedule and only take a new platform list.
  */
 async function addPrompts(input: {
   projectId: string;
@@ -115,7 +117,15 @@ async function addPrompts(input: {
     );
   }
 
-  const nowIso = now.toISOString();
+  const tracker = await AiVisibilityRepository.getConfigForProject(
+    input.projectId,
+  );
+  const firstRunAt = nextScheduledRunAt(
+    tracker?.isActive && tracker.scheduleInterval === "monthly"
+      ? tracker
+      : null,
+    now,
+  );
   const json = platformsJson(platforms);
   await AiVisibilityPromptRepository.insertPrompts(
     toInsert.map((prompt, index) => ({
@@ -124,7 +134,7 @@ async function addPrompts(input: {
       prompt,
       platformsJson: json,
       isActive: true,
-      nextRunAt: nowIso,
+      nextRunAt: firstRunAt,
       // One millisecond apart so the list keeps the order they were given.
       createdAt: new Date(now.getTime() + index).toISOString(),
     })),
@@ -133,7 +143,7 @@ async function addPrompts(input: {
     await AiVisibilityPromptRepository.updatePrompt(row.id, {
       isActive: true,
       platformsJson: json,
-      nextRunAt: nowIso,
+      nextRunAt: firstRunAt,
       lastError: null,
     });
   }

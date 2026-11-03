@@ -11,6 +11,7 @@ import {
   vi,
 } from "vitest";
 import type * as AiVisibilityServiceModule from "./AiVisibilityService";
+import type * as PromptServiceModule from "./AiVisibilityPromptService";
 import type * as SchedulerModule from "./scheduledAiVisibilityChecks";
 
 // The PAI-255 prompt phase of the AI visibility cron, over in-memory SQLite
@@ -65,6 +66,7 @@ const DUE = "2026-12-01T06:00:00.000Z";
 
 let client: Client;
 let Scheduler: typeof SchedulerModule;
+let PromptService: typeof PromptServiceModule;
 
 beforeAll(async () => {
   client = createClient({ url: "file::memory:" });
@@ -91,6 +93,7 @@ beforeAll(async () => {
     ${migrations}
   `);
   Scheduler = await import("./scheduledAiVisibilityChecks");
+  PromptService = await import("./AiVisibilityPromptService");
 }, 30_000);
 
 afterAll(() => client.close());
@@ -198,6 +201,46 @@ describe("buyer prompt phase of the AI visibility cron", () => {
     } finally {
       await client.execute("DROP TRIGGER no_results");
     }
+  });
+
+  it("added and reactivated prompts wait for the monthly tick, then run in it", async () => {
+    await client.executeMultiple(`
+      DELETE FROM ai_visibility_prompts;
+      UPDATE ai_visibility_configs SET next_check_at = '2026-12-01T06:00:00.000Z';
+    `);
+    const service = PromptService.AiVisibilityPromptService;
+    const mid = new Date("2026-11-03T07:00:00Z");
+    const added = await service.addPrompts({
+      projectId: "p1",
+      prompts: ["new buyer prompt", "removed buyer prompt"],
+      now: mid,
+    });
+    const removedId = added.prompts[1]?.id ?? "";
+    await service.removePrompts("p1", [removedId]);
+    await service.addPrompts({
+      projectId: "p1",
+      prompts: ["removed buyer prompt"],
+      now: new Date("2026-11-20T07:00:00Z"),
+    });
+
+    // Mid-month ticks (no tracker due) never run them.
+    await Scheduler.runScheduledAiVisibilityChecks(mid);
+    await Scheduler.runScheduledAiVisibilityChecks(
+      new Date("2026-11-20T07:05:00Z"),
+    );
+    expect(mocks.chatGptScraper).not.toHaveBeenCalled();
+
+    // The 1st: the mentions tracker runs on the first tick, prompts after.
+    mocks.runCheck.mockResolvedValue({ status: "checked", costUsd: 0 });
+    await Scheduler.runScheduledAiVisibilityChecks(
+      new Date("2026-12-01T06:00:00Z"),
+    );
+    expect(mocks.runCheck).toHaveBeenCalledOnce();
+    expect(mocks.chatGptScraper).not.toHaveBeenCalled();
+    await Scheduler.runScheduledAiVisibilityChecks(
+      new Date("2026-12-01T06:05:00Z"),
+    );
+    expect(mocks.chatGptScraper).toHaveBeenCalledTimes(2);
   });
 
   it("skips projects whose tracker is manual or paused", async () => {
