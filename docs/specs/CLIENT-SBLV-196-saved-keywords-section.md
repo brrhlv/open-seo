@@ -16,7 +16,7 @@ The admin needs to read a project's saved keywords (keyword, volume, KD, tags, s
 | `saved_keyword_tags` | Per-project tag names; `normalized_name` = trimmed, single-spaced, lowercased name (unique per project). |
 | `saved_keyword_tag_assignments` | keyword ↔ tag (unique pair). |
 
-`KeywordResearchService.getSavedKeywords` already reads all of it in one call (two queries plus a tag lookup). The section reuses it; there is no new repository code.
+`getSavedKeywords` (`keywords/services/research/saved-keywords.ts`, behind `KeywordResearchService`) already reads all of it in one call (two queries plus a tag lookup). The section reuses it; there is no new repository code.
 
 **No migration, no cron, no DataForSEO call.** Cost: $0/month.
 
@@ -28,11 +28,11 @@ New key `savedKeywords` on the summary response. Additive: older consumers ignor
 savedKeywords: {
   /** All saved keywords in the project. */
   totalCount: number;
-  /** true when totalCount > keywords.length (the list is capped at 250, newest first). */
+  /** true when totalCount > keywords.length (the list is capped at 100, newest saved first). */
   truncated: boolean;
   /** Every tag in the project with its keyword count, by normalized name. */
   tags: { name: string; keywordCount: number }[];
-  /** Newest saved first, at most 250. */
+  /** Newest saved first (saved_keywords.created_at desc), at most 100. */
   keywords: {
     keyword: string;              // normalized (trimmed, lowercased)
     searchVolume: number | null;  // monthly, for the saved row's location (project market)
@@ -76,7 +76,9 @@ Example (SBLV after the seed):
 }
 ```
 
-Why the whole list instead of a tag filter: the summary response is cached per project + range (15 minutes, Workers Cache), so a query-string filter would need its own cache key. 250 rows is a few KB; consumers filter by tag. A project that outgrows 250 shows `truncated: true` and a follow-up adds a dedicated endpoint.
+Why the list instead of a tag filter: the summary response is cached per project + range (15 minutes, Workers Cache), so a query-string filter would need its own cache key; consumers filter by tag.
+
+Why 100, newest saved first: the section ships on every summary fetch, including the admin dashboard's Search tile (5 s timeout). Measured on the SBLV rows, one keyword is about 360 bytes of JSON: the 62 SBLV rows are 22 KB raw (1.7 KB gzipped); 100 rows are about 36 KB raw; 250 would be about 90 KB raw (roughly 10–15 KB gzipped with real, less repetitive rows). Newest first (not highest volume) so a freshly saved batch always shows; the consumer re-sorts. A project that outgrows 100 shows `truncated: true`, and a follow-up adds a dedicated, tag-filtered endpoint.
 
 ### Tag conventions (SBLV, set by the seed; the API does not interpret them)
 
@@ -89,11 +91,12 @@ Why the whole list instead of a tag filter: the summary response is cached per p
 
 | File | Change |
 |---|---|
-| `src/server/features/public-api/sections/savedKeywords.ts` | New. `getSavedKeywordsSection(projectId)`: calls `KeywordResearchService.getSavedKeywords({ page: 1, pageSize: 250, sort: "createdAt", order: "desc" })`, maps rows to the contract, ISO timestamps through `toIsoTimestamp`. |
-| `src/server/features/public-api/sections/savedKeywords.test.ts` | New. Repository mocked (as `PublicSummaryService.test.ts` does): mapping, ISO conversion, the 250 cap and `truncated`, empty project. |
+| `src/server/features/public-api/sections/savedKeywords.ts` | New. `getSavedKeywordsSection(projectId)`: calls `getSavedKeywords({ page: 1, pageSize: 100, sort: "createdAt", order: "desc" })` from the leaf module `keywords/services/research/saved-keywords` (not the `KeywordResearchService` barrel, which pulls in the metered research path and the R2 cache), maps rows to the contract, ISO timestamps through `toIsoTimestamp`. |
+| `src/server/features/public-api/sections/savedKeywords.test.ts` | New. Repository mocked (as `PublicSummaryService.test.ts` does): mapping, ISO conversion, the 100 cap and `truncated`, empty project. |
 | `src/server/features/public-api/PublicSummaryService.ts` | Four lines: import, one entry in the `allSettled` list, one destructured name, one `unwrap` line. |
-| `src/server/features/public-api/PublicSummaryService.test.ts` | Mock `KeywordResearchRepository`; add `savedKeywords` to the full-shape assertion. |
-| `scripts/saved-keywords-seed-sql.ts` | New CLI. Turns a candidates JSON file (`{ candidates: [{ keyword, usVolume, keywordDifficulty, intent, cpc, monthlySearches, tags }] }`) into idempotent D1 SQL for one project. Writes nothing itself. |
+| `src/server/features/public-api/PublicSummaryService.test.ts` | Mock `KeywordResearchRepository`; add `savedKeywords` to the full-shape assertion; a rejecting `savedKeywords` read becomes `{ error }` while the other sections return. |
+| `src/server/features/keywords/savedKeywordsSeedSql.ts` (+ test, snapshot) | New. The pure SQL builder; reuses the app's `normalizeKeyword` and `normalizeSavedKeywordTag`. Snapshot of a 2-candidate input, plus idempotency and no-rollback checks against the D1 migrations in `node:sqlite`. |
+| `scripts/saved-keywords-seed-sql.ts` | New CLI around the builder. Turns a candidates JSON file (`{ candidates: [{ keyword, usVolume, keywordDifficulty, intent, cpc, monthlySearches, tags }] }`) into idempotent D1 SQL for one project. Writes nothing itself. |
 
 The SBLV seed SQL generated by the script lives with the research, not in this public repo: `socialbooth-lv/_meta/reports/SBLV-196/seed-saved-keywords.sql`.
 
@@ -102,7 +105,7 @@ The SBLV seed SQL generated by the script lives with the research, not in this p
 Per keyword (location 2840, language `en`):
 
 1. `INSERT OR IGNORE INTO saved_keywords` (unique key makes a re-run a no-op).
-2. `INSERT INTO keyword_metrics … ON CONFLICT (project_id, keyword, location_code, language_code) DO UPDATE` — the same upsert `save_keywords` does.
+2. `INSERT INTO keyword_metrics … ON CONFLICT (project_id, keyword, location_code, language_code) DO UPDATE … WHERE excluded.fetched_at > keyword_metrics.fetched_at`, so re-running an old seed never rolls back fresher metrics.
 3. `INSERT OR IGNORE INTO saved_keyword_tags` per distinct tag (normalized name as `saveKeywords` computes it).
 4. `INSERT OR IGNORE INTO saved_keyword_tag_assignments SELECT …` joined by project + keyword and project + normalized tag name, so it works whether the keyword row was new or already there.
 
