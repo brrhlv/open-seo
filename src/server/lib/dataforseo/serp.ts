@@ -12,6 +12,7 @@ import {
   type DataforseoTaskLike,
 } from "@/server/lib/dataforseo/envelope";
 import { AppError } from "@/server/lib/errors";
+import { resolveSerpItemSite } from "@/server/lib/dataforseo/serpItemSite";
 
 // Default depth for keyword SERP analysis. DataForSEO crawls (and bills) one
 // Google page of 10 results at a time, and the crawls are sequential, so depth
@@ -33,7 +34,10 @@ function clampSerpDepth(depth: number): number {
  * instead of two. Matching is restricted to organic results and uses
  * with_subdomains, mirroring buildRankCheckResult exactly: without
  * find_targets_in, a sitelink or PAA mention could stop the crawl before the
- * domain's organic listing and record a false "not ranking".
+ * domain's organic listing and record a false "not ranking". A result Google
+ * wraps in a goto redirect (see resolveSerpItemSite) presumably does not
+ * trigger the stop, since DataForSEO reports its domain as google.com: the
+ * crawl then runs to full depth, which costs more but never hides the match.
  */
 function stopCrawlOnTarget(targetDomain: string) {
   return {
@@ -128,11 +132,16 @@ function buildRankCheckResult(
   items: SerpLiveItem[],
 ): RankCheckResult {
   const target = input.targetDomain.toLowerCase();
-  const organicMatch = items.find((item) => {
-    if (item.type !== "organic" || item.domain == null) return false;
-    const domain = item.domain.toLowerCase();
-    return domain === target || domain.endsWith(`.${target}`);
-  });
+  let match: { item: SerpLiveItem; url: string | null } | undefined;
+  for (const item of items) {
+    if (item.type !== "organic") continue;
+    const site = resolveSerpItemSite(item);
+    const domain = site.domain?.toLowerCase();
+    if (domain && (domain === target || domain.endsWith(`.${target}`))) {
+      match = { item, url: site.url };
+      break;
+    }
+  }
 
   return {
     keywordId: input.keywordId,
@@ -140,10 +149,10 @@ function buildRankCheckResult(
     // rank_group = position among organic results only (what users count as
     // "my ranking"). rank_absolute would also count SERP features (local
     // pack, PAA, AI overviews) and reads as worse than what users see.
-    position: organicMatch
-      ? (organicMatch.rank_group ?? organicMatch.rank_absolute ?? null)
+    position: match
+      ? (match.item.rank_group ?? match.item.rank_absolute ?? null)
       : null,
-    url: organicMatch?.url ?? null,
+    url: match?.url ?? null,
     serpFeatures: [...new Set(items.map((item) => item.type).filter(Boolean))],
   };
 }

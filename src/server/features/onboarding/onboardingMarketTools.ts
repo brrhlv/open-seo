@@ -4,6 +4,7 @@ import { z } from "zod";
 import { DomainService } from "@/server/features/domain/services/DomainService";
 import { BacklinksService } from "@/server/features/backlinks/services/BacklinksService";
 import { isLabsLocationCode, LOCATIONS } from "@/shared/keyword-locations";
+import { resolveSerpItemSite } from "@/server/lib/dataforseo/serpItemSite";
 import type { ToolContext } from "@/server/features/onboarding/onboardingChatTools";
 
 // Tools that analyze any domain / the wider market (domain overview, SERP,
@@ -87,12 +88,16 @@ export function marketTools(ctx: ToolContext): ToolSet {
                 results: items
                   .filter((item) => item.type === "organic")
                   .slice(0, 10)
-                  .map((item) => ({
-                    rank: item.rank_group ?? item.rank_absolute ?? null,
-                    domain: item.domain ?? null,
-                    title: item.title ?? null,
-                    url: item.url ?? null,
-                  })),
+                  .map((item) => {
+                    // Goto-wrapped results report the real site.
+                    const site = resolveSerpItemSite(item);
+                    return {
+                      rank: item.rank_group ?? item.rank_absolute ?? null,
+                      domain: site.domain ?? item.domain ?? null,
+                      title: item.title ?? null,
+                      url: site.url ?? item.url ?? null,
+                    };
+                  }),
               };
             } catch (error) {
               return {

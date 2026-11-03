@@ -3,6 +3,7 @@ import {
   createDataforseoClient,
   SERP_ANALYSIS_DEPTH,
 } from "@/server/lib/dataforseo";
+import { resolveSerpItemSite } from "@/server/lib/dataforseo/serpItemSite";
 import { mcpResponse } from "@/server/mcp/formatters";
 import { buildProjectMeta } from "@/server/mcp/context";
 import { optionalMetaOutputSchema } from "@/server/mcp/output-schemas";
@@ -117,14 +118,18 @@ export const getSerpResultsTool = {
             depth,
           });
           // Trim noise — return only essentials per item.
-          const trimmed = items.slice(0, depth).map((item) => ({
-            type: item.type,
-            rank: item.rank_absolute ?? item.rank_group ?? null,
-            title: item.title ?? null,
-            url: item.url ?? null,
-            domain: item.domain ?? null,
-            description: item.description ?? null,
-          }));
+          const trimmed = items.slice(0, depth).map((item) => {
+            // Goto-wrapped results report the real site, not google.com.
+            const site = resolveSerpItemSite(item);
+            return {
+              type: item.type,
+              rank: item.rank_absolute ?? item.rank_group ?? null,
+              title: item.title ?? null,
+              url: site.url ?? item.url ?? null,
+              domain: site.domain ?? item.domain ?? null,
+              description: item.description ?? null,
+            };
+          });
           return { keyword: q.keyword, ok: true as const, items: trimmed };
         } catch (error) {
           return {
