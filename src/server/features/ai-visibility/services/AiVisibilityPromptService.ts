@@ -191,14 +191,15 @@ async function addPrompts(input: {
   const nowIso = now.toISOString();
   const json = platformsJson(platforms);
   await AiVisibilityPromptRepository.insertPrompts(
-    toInsert.map((prompt) => ({
+    toInsert.map((prompt, index) => ({
       id: crypto.randomUUID(),
       projectId: input.projectId,
       prompt,
       platformsJson: json,
       isActive: true,
       nextRunAt: nowIso,
-      createdAt: nowIso,
+      // One millisecond apart so the list keeps the order they were given.
+      createdAt: new Date(now.getTime() + index).toISOString(),
     })),
   );
   for (const row of toReactivate) {

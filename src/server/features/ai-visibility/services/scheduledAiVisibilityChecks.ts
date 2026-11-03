@@ -3,6 +3,7 @@ import {
   AiVisibilityService,
   nextMonthlyCheckAt,
 } from "@/server/features/ai-visibility/services/AiVisibilityService";
+import { runScheduledPromptChecks } from "@/server/features/ai-visibility/services/scheduledPromptChecks";
 
 // A run is ~8 sequential DataForSEO calls made inline (no Workflow), so keep
 // each tick small: Workers Free caps a cron invocation at 50 subrequests, and
@@ -85,7 +86,8 @@ export async function runScheduledAiVisibilityChecks(now = new Date()) {
     }
   }
 
-  if (due.length === 0) return;
+  // PAI-255: buyer prompts run only on ticks with no tracker due.
+  if (due.length === 0) return runScheduledPromptChecks(now);
   (errors > 0 ? console.error : console.log)({
     event: "ai_visibility_scheduler_summary",
     candidates: due.length,

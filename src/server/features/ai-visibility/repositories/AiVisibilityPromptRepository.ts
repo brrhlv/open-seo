@@ -86,6 +86,7 @@ async function getDuePromptsWithOrganization(nowIso: string, limit: number) {
     .select({
       prompt: aiVisibilityPrompts,
       organizationId: projects.organizationId,
+      projectDomain: projects.domain,
     })
     .from(aiVisibilityPrompts)
     .innerJoin(projects, eq(aiVisibilityPrompts.projectId, projects.id))
