@@ -262,6 +262,11 @@ describe("GbpWatchService", () => {
       updates: false,
     });
     expect(mocks.snapshots[0]?.reviewsJson).toBeNull();
+    const gapView = await GbpWatchService.getWatch(PROJECT, NEXT_MON);
+    // Not "0 new": the latest check did not collect reviews.
+    expect(gapView.newReviewCount).toBeNull();
+    expect(gapView.latestReviews).toHaveLength(5);
+    expect(gapView.latestReviews.some((r) => r.isNew)).toBe(false);
 
     mocks.fetchTask.mockResolvedValue({
       status: "completed",

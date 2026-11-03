@@ -34,7 +34,7 @@ function describeWatch(view: GbpWatchView): string {
   if (!p) return "No snapshot stored yet.";
   const lines = [
     `Latest snapshot ${p.capturedAt ?? "?"}: ${p.title ?? "?"}, ${p.primaryCategory ?? "no primary category"}${p.additionalCategories.length ? ` (+ ${p.additionalCategories.join(", ")})` : ""}.`,
-    `- rating ${view.rating.value ?? "n/a"}${signed(view.rating.valueChange)} from ${view.rating.reviewCount ?? "n/a"} reviews${signed(view.rating.reviewCountChange)}; ${view.newReviewCount} new since the previous snapshot`,
+    `- rating ${view.rating.value ?? "n/a"}${signed(view.rating.valueChange)} from ${view.rating.reviewCount ?? "n/a"} reviews${signed(view.rating.reviewCountChange)}; ${view.newReviewCount === null ? "reviews not collected in the latest snapshot" : `${view.newReviewCount} new since the previous snapshot`}`,
     `- website ${p.website ?? "none"}; hours ${p.hoursText ?? "none listed"}`,
     `- unanswered Q&A: ${view.questionsAvailable ? view.unansweredQuestions.length : "Google shows no Q&A"}`,
   ];

@@ -64,7 +64,8 @@ export type GbpWatchView = {
     comparedTo: string | null;
   };
   latestReviews: GbpReview[];
-  newReviewCount: number;
+  /** New in the latest check; null when that check did not collect reviews. */
+  newReviewCount: number | null;
   questionsAvailable: boolean;
   unansweredQuestions: {
     questionId: string | null;
@@ -200,7 +201,14 @@ export function buildGbpWatchView(
   const rows = sameProfileRun(allRows);
   const [latest, previous] = rows;
   // Lists come from the newest snapshot that collected them.
-  const reviews = rows.map(readReviews).find((list) => list !== null) ?? [];
+  // "New" belongs to the latest check only. When it missed reviews, the list
+  // falls back to an older check with its "new" flags cleared.
+  const latestReviewList = latest ? readReviews(latest) : null;
+  const reviews =
+    latestReviewList ??
+    (rows.map(readReviews).find((list) => list !== null) ?? []).map(
+      (review) => ({ ...review, isNew: false }),
+    );
   const questions = rows.map(readQuestions).find((list) => list !== null) ?? [];
 
   return {
@@ -216,7 +224,9 @@ export function buildGbpWatchView(
     latestReviews: sort(reviews, (a, b) =>
       (b.publishedAt ?? "").localeCompare(a.publishedAt ?? ""),
     ).slice(0, LATEST_REVIEWS),
-    newReviewCount: reviews.filter((review) => review.isNew).length,
+    newReviewCount: latestReviewList
+      ? latestReviewList.filter((review) => review.isNew).length
+      : null,
     questionsAvailable: questions.length > 0,
     unansweredQuestions: questions
       .filter((question) => !question.answered)
