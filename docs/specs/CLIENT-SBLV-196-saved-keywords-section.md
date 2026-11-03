@@ -83,6 +83,7 @@ Why the whole list instead of a tag filter: the summary response is cached per p
 - `blog-idea`: a keyword meant to become a blog post.
 - `cluster:<slug>`: the topic cluster (`corporate-events`, `holiday-party`, `trade-shows`, …).
 - `page:<path>`: the money page the post should link to.
+- `priority:p1|p2|p3`: the research priority (p1 = seasonal or best volume-to-difficulty).
 
 ## Code
 
@@ -122,5 +123,5 @@ None. The Saved page already shows the keywords and tags; nothing in the OpenSEO
 1. Merge, deploy (alchemy, per `reference_openseo_setup`). No migration.
 2. Run the seed against production D1 through the CF API (coordinator; this branch does not write D1):
    `POST /accounts/{account}/d1/database/3c6f2f61-8748-4944-b900-2f857b02059b/query` with the SQL from `seed-saved-keywords.sql` (one statement per request, or the file split on `;\n`).
-3. Verify: `SELECT count(*) FROM saved_keywords WHERE project_id = 'c65ed7c9-ee05-4b6d-a61f-8817c7a003ae'` = 62 (plus any saved before); then `GET …/summary?range=last_28_days` shows `savedKeywords.totalCount`. The summary is edge-cached 15 minutes and the admin caches 10 minutes, so allow up to 25 minutes before the panel fills.
+3. Verify: `SELECT count(*) FROM saved_keywords WHERE project_id = 'c65ed7c9-ee05-4b6d-a61f-8817c7a003ae'` = 62 (plus any saved before), 30 tags, 248 tag assignments; then `GET …/summary?range=last_28_days` shows `savedKeywords.totalCount`. The summary is edge-cached 15 minutes and the admin caches 10 minutes, so allow up to 25 minutes before the panel fills.
 4. No backfill, no first run: the data is live once the rows exist.
