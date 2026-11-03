@@ -272,7 +272,7 @@ describe("PublicSummaryService.getSummary", () => {
     });
   });
 
-  it("keeps every existing key and only adds the v2 ones (consumers depend on them)", async () => {
+  it("keeps every existing key and adds each new section (consumers depend on them)", async () => {
     mocks.getOrganicOverview.mockResolvedValue({
       current: null,
       previous: null,
@@ -306,6 +306,8 @@ describe("PublicSummaryService.getSummary", () => {
       "sources",
       "keyEvents",
     ]);
+    // PAI-255 nests buyer prompts under aiVisibility, not at the top level.
+    expect(summary?.aiVisibility).toMatchObject({ prompts: NO_PROMPTS });
   });
 
   it("adds the v2 sections, each failing on its own", async () => {
