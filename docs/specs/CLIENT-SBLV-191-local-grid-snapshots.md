@@ -43,6 +43,7 @@ local_grid_configs            one tracker per project
   is_active boolean not null default true
   last_checked_at text null
   next_check_at text null
+  lease_until text null        a run in progress (cron or MCP) holds the tracker until then (10 min)
   last_error text null
   created_at text not null default now
   index (is_active, next_check_at)
@@ -50,7 +51,9 @@ local_grid_configs            one tracker per project
 local_grid_keywords           the keywords a tracker runs
   id text pk
   config_id text fk→local_grid_configs cascade
-  keyword text not null
+  keyword text not null        stored lowercased (so is the snapshot keyword)
+  attempts integer not null default 0, attempt_period text null
+                               failed or degraded runs this month; 3 and the keyword waits for next month
   created_at text not null default now
   unique (config_id, keyword)
 
@@ -61,7 +64,8 @@ local_grid_snapshots          one row per (project, keyword, UTC month)
   period text not null         YYYY-MM
   center_latitude real, center_longitude real, grid_size integer, spacing_km real, zoom integer, device text
                                the run's own geometry, so a later config change cannot relabel old rows
-  points_searched integer, points_found integer, top3_count integer, top10_count integer
+  points_searched integer, points_found integer, points_failed integer, top3_count integer, top10_count integer
+                               over a third of points failed = stored but not final: retried this month
   solv_pct real null           share of local voice: top-3 points / points searched × 100
   arp real null                average rank where found
   atrp real null               average rank over all searched points, not-found = depth + 1 (21)
@@ -93,17 +97,19 @@ Failed points: a point whose search fails is stored with `error = true` and coun
 
 - **Monthly, on the 2nd at 07:00 UTC** (AI visibility owns the 1st). `next_check_at` moves to the next month's 2nd once every keyword has this month's row.
 - **One keyword per `*/5` tick.** A keyword is 9 Maps calls (3×3), batched 3 at a time. Workers Free caps an invocation at 50 subrequests and the rank loop shares the tick, so 9 is the safe unit. Three keywords drain in 15 minutes.
-- Claim: a compare-and-set on `next_check_at` (lease of 10 minutes) so overlapping ticks never run the same tracker; after a keyword, `next_check_at` becomes `now` if more keywords are due, else next month. A failure sets `last_error` and retries in 6 hours.
+- **Call budget:** a run (cron or MCP) makes at most 27 Maps calls: `keywordsPerRun = max(1, floor(27 / gridSize²))`. **5×5 trackers are refused** until the Worker is on a paid plan (25 calls per keyword beside the rank loop).
+- **Lease:** cron and `run_local_grid` both take `lease_until` by compare-and-set; a held tracker is skipped by cron and refused to MCP. The run sets `next_check_at` itself: `now` while untried keywords remain, `now + 6 h` while only retries remain, else the next 2nd. A whole-run failure (credits, auth) sets `last_error` and retries in 6 hours.
+- **Retries:** a keyword whose grid throws, or whose snapshot has over a third of its points failed, counts an attempt and goes behind untried keywords; after 3 attempts in a month it waits for next month, so it cannot starve the others.
 - **Cost:** a 3×3 grid is **9 SERP calls per keyword**. Maps live advanced is $0.002 per call (verified 2026-11-02: 9 calls, $0.018). So $0.018 per keyword per month; SBLV's three keywords = **$0.054/month** ($0.65/year). A 5×5 grid is 25 calls = $0.05 per keyword. Self-host: 1 credit = $0.001, so 18 credits per 3×3 keyword.
 - MCP runs are free when the month is already captured (unless `force`).
 
 ## 6. MCP tools
 
-| Tool | Credits | Input | Does |
-|---|---|---|---|
-| `create_local_grid_tracker` | none | projectId, keywords[1..10], target {placeId?, cid?, name?}, center {latitude, longitude}, gridSize 3/5, spacingKm, scheduleInterval monthly/manual | Upserts the project's tracker and replaces its keyword list. First monthly run: the next 2nd. |
-| `run_local_grid` | yes | projectId, keywords? (subset), force? | Runs the due keywords now (all tracker keywords lacking this month's row; all of them with `force`). Description states the cost: 9 calls ≈ $0.018 per keyword on 3×3. Max 3 keywords per call (27 calls). |
-| `get_local_grid` | none | projectId | Stored latest + previous per keyword, rendered as text grids with deltas. |
+| Tool                        | Credits | Input                                                                                                                                            | Does                                                                                                                                                                                                                                                                                                                                   |
+| --------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `create_local_grid_tracker` | none    | projectId, keywords[1..10], target {placeId?, cid?, name?}, center {latitude, longitude}, gridSize 3, spacingKm, scheduleInterval monthly/manual | Upserts the project's tracker and replaces its keyword list. Any edit resets the next run to the next 2nd.                                                                                                                                                                                                                             |
+| `run_local_grid`            | yes     | projectId, keywords? (subset), force?                                                                                                            | Runs the due keywords now (all tracker keywords lacking this month's row; all of them with `force`). Description states the cost: 9 calls ≈ $0.018 per keyword on 3×3. Max 27 calls per call (3 keywords on 3×3). Returns `checked`, `failed`, `alreadyCaptured`, `remaining`, `retry`, `gaveUp`. Refused while a run holds the lease. |
+| `get_local_grid`            | none    | projectId                                                                                                                                        | Stored latest + previous per keyword, rendered as text grids with deltas.                                                                                                                                                                                                                                                              |
 
 ## 7. Public summary: `localGrid`
 
@@ -111,39 +117,67 @@ Additive key; consumers that predate it ignore it. Read from D1 only. Absent tra
 
 ```ts
 type LocalGridSection = {
-  tracked: boolean;                 // an active tracker exists
-  target: { name: string | null; placeId: string | null; cid: string | null } | null;
+  tracked: boolean; // a tracker exists (active or paused)
+  paused: boolean; // tracker paused; stored grids are still returned
+  target: {
+    name: string | null;
+    placeId: string | null;
+    cid: string | null;
+  } | null;
   center: { latitude: number; longitude: number } | null;
-  gridSize: number | null;          // 3 or 5
+  gridSize: number | null; // 3 or 5
   spacingKm: number | null;
   scheduleInterval: "monthly" | "manual" | null;
-  lastCheckedAt: string | null;     // ISO
-  nextCheckAt: string | null;       // ISO
-  keywords: LocalGridKeyword[];     // tracker keyword order, then stored-only keywords
+  lastCheckedAt: string | null; // ISO
+  nextCheckAt: string | null; // ISO
+  keywords: LocalGridKeyword[]; // tracker keyword order, then stored-only keywords
 };
 type LocalGridKeyword = {
   keyword: string;
-  period: string;                   // "YYYY-MM"
+  period: string; // "YYYY-MM"
   capturedAt: string | null;
-  gridSize: number; spacingKm: number; zoom: number; device: "desktop" | "mobile";
-  pointsSearched: number; pointsFound: number; top3Count: number; top10Count: number;
-  solvPct: number | null;           // 0..100
-  arp: number | null;               // 1 decimal place precision kept to 2
+  gridSize: number;
+  spacingKm: number;
+  zoom: number;
+  device: "desktop" | "mobile";
+  pointsSearched: number;
+  pointsFailed: number;
+  pointsFound: number;
+  top3Count: number;
+  top10Count: number;
+  solvPct: number | null; // 0..100
+  arp: number | null; // 1 decimal place precision kept to 2
   atrp: number | null;
-  cells: LocalGridCell[];           // row-major, row 0 = north
+  cells: LocalGridCell[]; // row-major, row 0 = north
   previous: {
-    period: string; capturedAt: string | null;
-    solvPct: number | null; arp: number | null; atrp: number | null; pointsFound: number;
+    period: string;
+    capturedAt: string | null;
+    solvPct: number | null;
+    arp: number | null;
+    atrp: number | null;
+    pointsFound: number;
     cells: { row: number; col: number; rank: number | null }[];
   } | null;
-  delta: { solvPct: number | null; arp: number | null; atrp: number | null; pointsFound: number } | null;
-                                    // latest minus previous; lower arp/atrp is better
+  delta: {
+    solvPct: number | null;
+    arp: number | null;
+    atrp: number | null;
+    pointsFound: number;
+  } | null;
+  // latest minus previous; lower arp/atrp is better
 };
 type LocalGridCell = {
-  row: number; col: number; latitude: number; longitude: number;
-  rank: number | null;              // null = not in the top 20 there
+  row: number;
+  col: number;
+  latitude: number;
+  longitude: number;
+  rank: number | null; // null = not in the top 20 there
   resultsCount: number | null;
-  topCompetitor: { title: string | null; cid: string | null; rank: number } | null;
+  topCompetitor: {
+    title: string | null;
+    cid: string | null;
+    rank: number;
+  } | null;
   error: boolean;
 };
 ```
@@ -153,24 +187,69 @@ Example (the live 2026-11-02 run, trimmed to two cells):
 ```json
 {
   "tracked": true,
-  "target": { "name": "Social Booth LV", "placeId": "ChIJuy0JGkfryIARL3wzklrIlU0", "cid": "5590594803775798319" },
+  "paused": false,
+  "target": {
+    "name": "Social Booth LV",
+    "placeId": "ChIJuy0JGkfryIARL3wzklrIlU0",
+    "cid": "5590594803775798319"
+  },
   "center": { "latitude": 36.2108236, "longitude": -115.2695665 },
-  "gridSize": 3, "spacingKm": 2, "scheduleInterval": "monthly",
-  "lastCheckedAt": "2026-11-03T07:19:36.000Z", "nextCheckAt": "2026-12-02T07:00:00.000Z",
-  "keywords": [{
-    "keyword": "brand activation photo booth las vegas",
-    "period": "2026-11", "capturedAt": "2026-11-03T07:19:36.000Z",
-    "gridSize": 3, "spacingKm": 2, "zoom": 13, "device": "mobile",
-    "pointsSearched": 9, "pointsFound": 9, "top3Count": 9, "top10Count": 9,
-    "solvPct": 100, "arp": 1.56, "atrp": 1.56,
-    "cells": [
-      { "row": 0, "col": 0, "latitude": 36.228911, "longitude": -115.2918337, "rank": 1, "resultsCount": 6,
-        "topCompetitor": { "title": "BoothNV Photo Booth Rentals", "cid": "4471254093198449300", "rank": 2 }, "error": false },
-      { "row": 0, "col": 2, "latitude": 36.228911, "longitude": -115.2472993, "rank": 2, "resultsCount": 6,
-        "topCompetitor": { "title": "Kreate Leverage 360 Photobooth", "cid": "1151987186264550461", "rank": 1 }, "error": false }
-    ],
-    "previous": null, "delta": null
-  }]
+  "gridSize": 3,
+  "spacingKm": 2,
+  "scheduleInterval": "monthly",
+  "lastCheckedAt": "2026-11-03T07:19:36.000Z",
+  "nextCheckAt": "2026-12-02T07:00:00.000Z",
+  "keywords": [
+    {
+      "keyword": "brand activation photo booth las vegas",
+      "period": "2026-11",
+      "capturedAt": "2026-11-03T07:19:36.000Z",
+      "gridSize": 3,
+      "spacingKm": 2,
+      "zoom": 13,
+      "device": "mobile",
+      "pointsSearched": 9,
+      "pointsFailed": 0,
+      "pointsFound": 9,
+      "top3Count": 9,
+      "top10Count": 9,
+      "solvPct": 100,
+      "arp": 1.56,
+      "atrp": 1.56,
+      "cells": [
+        {
+          "row": 0,
+          "col": 0,
+          "latitude": 36.228911,
+          "longitude": -115.2918337,
+          "rank": 1,
+          "resultsCount": 6,
+          "topCompetitor": {
+            "title": "BoothNV Photo Booth Rentals",
+            "cid": "4471254093198449300",
+            "rank": 2
+          },
+          "error": false
+        },
+        {
+          "row": 0,
+          "col": 2,
+          "latitude": 36.228911,
+          "longitude": -115.2472993,
+          "rank": 2,
+          "resultsCount": 6,
+          "topCompetitor": {
+            "title": "Kreate Leverage 360 Photobooth",
+            "cid": "1151987186264550461",
+            "rank": 1
+          },
+          "error": false
+        }
+      ],
+      "previous": null,
+      "delta": null
+    }
+  ]
 }
 ```
 
@@ -192,6 +271,6 @@ The admin owns layout (its spec covers 1440 / 1180 / 820 / 390). The API guarant
 
 1. Merge; deploy self-host (the chained alchemy command in `reference_openseo_setup.md`).
 2. Apply the D1 migration `0046_*` (coordinator renumbers if another wave ticket lands first).
-3. Create the SBLV tracker (MCP `create_local_grid_tracker`, or D1 insert): keywords *photo booth rental las vegas*, *brand activation photo booth las vegas*, *360 photo booth rental las vegas*; target place_id + CID above; center 36.2108236,-115.2695665; 3×3, 2 km; monthly.
+3. Create the SBLV tracker (MCP `create_local_grid_tracker`, or D1 insert): keywords _photo booth rental las vegas_, _brand activation photo booth las vegas_, _360 photo booth rental las vegas_; target place_id + CID above; center 36.2108236,-115.2695665; 3×3, 2 km; monthly.
 4. Baseline: `run_local_grid` for SBLV (≈ $0.054), or set `next_check_at` to now and let three ticks drain it. **Bryan decision first:** CLIENT-SBLV-188 §5 says run the baseline after the GBP category question is settled, or the baseline mixes two configurations.
 5. Check `GET /api/public/v1/projects/c65ed7c9-…/summary` returns `localGrid.keywords[3]`.
