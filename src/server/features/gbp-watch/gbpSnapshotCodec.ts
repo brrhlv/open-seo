@@ -8,7 +8,6 @@ import {
   type GbpChange,
   type GbpHours,
   type GbpProfile,
-  type GbpQuestion,
   type GbpReview,
   type GbpUpdate,
 } from "./gbpWatchModel";
@@ -30,14 +29,6 @@ const reviewSchema = z.object({
   ownerReplied: z.boolean(),
   ownerRepliedAt: nullableString,
   isNew: z.boolean(),
-});
-
-const questionSchema = z.object({
-  questionId: nullableString,
-  text: z.string(),
-  author: nullableString,
-  askedAt: nullableString,
-  answered: z.boolean(),
 });
 
 const updateSchema = z.object({
@@ -78,8 +69,6 @@ function parseJson<T>(json: string | null, schema: z.ZodType<T>): T | null {
 
 export const readReviews = (row: GbpSnapshotRow): GbpReview[] | null =>
   parseJson(row.reviewsJson, z.array(reviewSchema));
-export const readQuestions = (row: GbpSnapshotRow): GbpQuestion[] | null =>
-  parseJson(row.questionsJson, z.array(questionSchema));
 export const readUpdates = (row: GbpSnapshotRow): GbpUpdate[] | null =>
   parseJson(row.updatesJson, z.array(updateSchema));
 export const readChanges = (row: GbpSnapshotRow): GbpChange[] =>
@@ -133,7 +122,6 @@ export function snapshotInsert(input: {
   capturedAt: string;
   profile: GbpProfile;
   reviews: GbpReview[] | null;
-  questions: GbpQuestion[] | null;
   updates: GbpUpdate[] | null;
   changes: GbpChange[];
   costUsd: number;
@@ -157,7 +145,6 @@ export function snapshotInsert(input: {
     totalPhotos: profile.totalPhotos,
     isClaimed: profile.isClaimed,
     reviewsJson: toJson(input.reviews),
-    questionsJson: toJson(input.questions),
     updatesJson: toJson(input.updates),
     changesJson: JSON.stringify(input.changes),
     billingCostUsd: input.costUsd,

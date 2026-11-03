@@ -5,7 +5,6 @@ import {
   type BusinessTaskEndpoint,
 } from "@/server/lib/dataforseo";
 import { AppError } from "@/server/lib/errors";
-import { formatBusinessDataCoordinate } from "@/server/mcp/tools/local-seo-shared";
 import {
   GbpWatchRepository,
   type GbpConfig,
@@ -24,7 +23,6 @@ import {
 } from "@/server/features/gbp-watch/gbpWatchDiff";
 import {
   normalizeProfile,
-  normalizeQuestions,
   normalizeReviews,
   normalizeUpdates,
   parseExpected,
@@ -38,15 +36,12 @@ import {
 
 /**
  * CLIENT-SBLV-193: weekly Google Business Profile watch. A run stores one
- * gbp_snapshots row (profile, newest reviews, Q&A, owner posts) and the
+ * gbp_snapshots row (profile, newest reviews, owner posts) and the
  * watched-field changes since the previous row. Reads never call DataForSEO.
  */
 
 const REVIEWS_DEPTH = 10;
 const UPDATES_DEPTH = 10;
-const QUESTIONS_DEPTH = 20;
-// Q&A needs a coordinate; 1 km around the profile's own pin.
-const QUESTIONS_RADIUS_KM = 1;
 // Same window as the get_business_reviews / get_business_updates tools.
 const TASK_POLL_ATTEMPTS = 6;
 const TASK_POLL_INTERVAL_MS = 4000;
@@ -56,11 +51,12 @@ const RECENT_RUN_MS = 60 * 60 * 1000;
 const PREVIOUS_ROWS = 10;
 
 /**
- * Measured 2026-11-03: profile $0.0054, Q&A $0.0054 (billed when empty),
- * reviews $0.0015 per 10 at high priority; owner posts estimated the same.
- * Only feeds the run tool's description; billing_cost_usd is the real figure.
+ * Measured 2026-11-03: profile $0.0054, reviews $0.0015 per 10 at high
+ * priority; owner posts estimated the same. No Q&A: Google retired the module
+ * but DataForSEO still bills the call (Bryan, 2026-11-03). Only feeds the run
+ * tool's description; billing_cost_usd is the real figure.
  */
-export const ESTIMATED_RUN_COST_USD = 0.014;
+export const ESTIMATED_RUN_COST_USD = 0.009;
 
 // ---------------------------------------------------------------------------
 // Schedule
@@ -87,7 +83,6 @@ async function setWatch(input: {
   placeId?: string;
   listingId?: string;
   expected?: GbpExpected;
-  includeQuestions?: boolean;
   scheduleInterval?: "weekly" | "manual";
   active?: boolean;
   now?: Date;
@@ -116,8 +111,6 @@ async function setWatch(input: {
     expectedJson: input.expected
       ? JSON.stringify(input.expected)
       : (existing?.expectedJson ?? "{}"),
-    includeQuestions:
-      input.includeQuestions ?? existing?.includeQuestions ?? true,
     scheduleInterval,
     isActive,
     nextCheckAt:
@@ -137,7 +130,7 @@ type GbpRunResult = {
   costUsd: number;
   changes: number;
   drift: number;
-  collected: { reviews: boolean; questions: boolean; updates: boolean };
+  collected: { reviews: boolean; updates: boolean };
 };
 
 type Market = { locationCode: number; languageCode: string };
@@ -177,7 +170,7 @@ function errorMessage(error: unknown): string {
 /**
  * Snapshot the project's profile now. Without `force`, a snapshot from the
  * last hour returns `already_captured` without calling DataForSEO. Only a
- * missing profile fails the run; reviews, Q&A and posts that fail or are
+ * missing profile fails the run; reviews and posts that fail or are
  * still queued are stored as "not collected" for this run.
  */
 async function runSnapshot(input: {
@@ -220,7 +213,7 @@ async function runSnapshot(input: {
       costUsd: 0,
       changes: 0,
       drift: 0,
-      collected: { reviews: false, questions: false, updates: false },
+      collected: { reviews: false, updates: false },
     };
   }
 
@@ -253,25 +246,7 @@ async function runSnapshot(input: {
     : normalizeProfile(item);
 
   const pollMs = input.pollIntervalMs ?? TASK_POLL_INTERVAL_MS;
-  const { latitude, longitude } = profile;
-  const [questionRows, reviewItems, updateItems] = await Promise.all([
-    config.includeQuestions && latitude !== null && longitude !== null
-      ? client.business
-          .questionsAnswers({
-            keyword,
-            locationCoordinate: formatBusinessDataCoordinate({
-              latitude,
-              longitude,
-              radiusKm: QUESTIONS_RADIUS_KM,
-            }),
-            languageCode,
-            depth: QUESTIONS_DEPTH,
-          })
-          .catch((error: unknown) => {
-            console.error("[gbp-watch] Q&A failed:", error);
-            return null;
-          })
-      : Promise.resolve(null),
+  const [reviewItems, updateItems] = await Promise.all([
     collectTask(
       "reviews",
       () =>
@@ -319,7 +294,6 @@ async function runSnapshot(input: {
         lastUpdates ? new Set(lastUpdates.map((u) => u.key)) : null,
       )
     : null;
-  const questions = questionRows ? normalizeQuestions(questionRows) : null;
   const changes = previous
     ? diffProfiles(profileFromRow(previous), profile, capturedAt)
     : [];
@@ -331,7 +305,6 @@ async function runSnapshot(input: {
       capturedAt,
       profile,
       reviews,
-      questions,
       updates,
       changes,
       costUsd,
@@ -357,7 +330,6 @@ async function runSnapshot(input: {
       .length,
     collected: {
       reviews: reviews !== null,
-      questions: questions !== null,
       updates: updates !== null,
     },
   };

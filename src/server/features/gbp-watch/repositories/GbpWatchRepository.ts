@@ -24,7 +24,6 @@ type ConfigValues = Pick<
   | "cid"
   | "listingId"
   | "expectedJson"
-  | "includeQuestions"
   | "scheduleInterval"
   | "isActive"
   | "nextCheckAt"

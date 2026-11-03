@@ -28,7 +28,6 @@ export const gbpConfigs = pgTable(
     cid: text("cid"),
     listingId: text("listing_id"),
     expectedJson: text("expected_json").notNull().default("{}"),
-    includeQuestions: boolean("include_questions").notNull().default(true),
     scheduleInterval: text("schedule_interval", {
       enum: ["weekly", "manual"],
     })
@@ -73,7 +72,6 @@ export const gbpSnapshots = pgTable(
     totalPhotos: integer("total_photos"),
     isClaimed: boolean("is_claimed"),
     reviewsJson: text("reviews_json"),
-    questionsJson: text("questions_json"),
     updatesJson: text("updates_json"),
     changesJson: text("changes_json").notNull().default("[]"),
     billingCostUsd: real("billing_cost_usd").notNull().default(0),

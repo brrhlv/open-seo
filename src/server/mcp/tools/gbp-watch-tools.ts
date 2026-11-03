@@ -36,7 +36,6 @@ function describeWatch(view: GbpWatchView): string {
     `Latest snapshot ${p.capturedAt ?? "?"}: ${p.title ?? "?"}, ${p.primaryCategory ?? "no primary category"}${p.additionalCategories.length ? ` (+ ${p.additionalCategories.join(", ")})` : ""}.`,
     `- rating ${view.rating.value ?? "n/a"}${signed(view.rating.valueChange)} from ${view.rating.reviewCount ?? "n/a"} reviews${signed(view.rating.reviewCountChange)}; ${view.newReviewCount === null ? "reviews not collected in the latest snapshot" : `${view.newReviewCount} new since the previous snapshot`}`,
     `- website ${p.website ?? "none"}; hours ${p.hoursText ?? "none listed"}`,
-    `- unanswered Q&A: ${view.questionsAvailable ? view.unansweredQuestions.length : "Google shows no Q&A"}`,
   ];
   lines.push(
     view.changes.length
@@ -56,7 +55,7 @@ export const getGbpWatchTool = {
   config: {
     title: "Get GBP watch",
     description:
-      "Read-only access to the project's stored Google Business Profile watch: the latest profile snapshot (categories, website, hours, rating, review count), the change in rating and review count since the previous snapshot, the latest 5 reviews with owner-reply status, unanswered Q&A, recent owner posts, profile changes in the last 90 days, and drift from the accepted state. Uses no credits and makes no DataForSEO call. Use set_gbp_watch to create the watch and run_gbp_snapshot to capture one now.",
+      "Read-only access to the project's stored Google Business Profile watch: the latest profile snapshot (categories, website, hours, rating, review count), the change in rating and review count since the previous snapshot, the latest 5 reviews with owner-reply status, recent owner posts, profile changes in the last 90 days, and drift from the accepted state. Uses no credits and makes no DataForSEO call. Use set_gbp_watch to create the watch and run_gbp_snapshot to capture one now.",
     inputSchema: projectOnly,
     outputSchema: z
       .object({
@@ -106,7 +105,7 @@ export const runGbpSnapshotTool = {
   name: "run_gbp_snapshot",
   config: {
     title: "Run GBP snapshot",
-    description: `Snapshot the project's Google Business Profile now (DataForSEO profile, newest reviews, Q&A and owner posts) and store the changes since the last snapshot. This spends credits: about $${ESTIMATED_RUN_COST_USD.toFixed(3)} per run. Show the user the estimate before calling. Free when a snapshot was taken in the last hour (unless force is set). Takes up to ~30 seconds while the review and post tasks settle. Requires a watch from set_gbp_watch. Read the result with get_gbp_watch.`,
+    description: `Snapshot the project's Google Business Profile now (DataForSEO profile, newest reviews and owner posts) and store the changes since the last snapshot. This spends credits: about $${ESTIMATED_RUN_COST_USD.toFixed(3)} per run. Show the user the estimate before calling. Free when a snapshot was taken in the last hour (unless force is set). Takes up to ~30 seconds while the review and post tasks settle. Requires a watch from set_gbp_watch. Read the result with get_gbp_watch.`,
     inputSchema: runInputSchema,
     outputSchema: z
       .object({
@@ -182,12 +181,6 @@ const setInputSchema = {
     .describe(
       "The accepted state: primaryCategory, allowedAdditionalCategories, forbiddenCategories, website, hours ({ monday: ['09:00-21:00'], ... }; a missing day is closed). Replaces the stored value when given.",
     ),
-  includeQuestions: z
-    .boolean()
-    .optional()
-    .describe(
-      "Collect Q&A each run ($0.0054, billed even when empty; Google retired the Q&A module in 2025). Defaults to true.",
-    ),
   scheduleInterval: z
     .enum(["weekly", "manual"])
     .optional()
@@ -222,7 +215,7 @@ export const setGbpWatchTool = {
         ? `Next snapshot: ${config.nextCheckAt}.`
         : "No scheduled snapshots.";
       return mcpResponse({
-        text: `GBP watch saved (${config.scheduleInterval}${config.isActive ? "" : ", paused"}, Q&A ${config.includeQuestions ? "on" : "off"}). ${schedule} No snapshot was started and no credits were used. Use run_gbp_snapshot for a baseline now.`,
+        text: `GBP watch saved (${config.scheduleInterval}${config.isActive ? "" : ", paused"}). ${schedule} No snapshot was started and no credits were used. Use run_gbp_snapshot for a baseline now.`,
         meta: buildProjectMeta(context, args.projectId, `/p/${args.projectId}`),
         structuredContent: { config },
       });

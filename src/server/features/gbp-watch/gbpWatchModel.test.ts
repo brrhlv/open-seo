@@ -9,7 +9,6 @@ import {
 } from "./gbpWatchDiff";
 import {
   normalizeProfile,
-  normalizeQuestions,
   normalizeReviews,
   normalizeUpdates,
   parseExpected,
@@ -303,37 +302,7 @@ describe("normalizeReviews", () => {
   });
 });
 
-describe("normalizeQuestions and normalizeUpdates", () => {
-  it("keeps the question text and whether it has an answer", () => {
-    expect(
-      normalizeQuestions([
-        {
-          question_id: "q1",
-          question_text: "Do you travel to Henderson?",
-          profile_name: "Asker",
-          timestamp: "2026-10-01 10:00:00 +00:00",
-          items: null,
-        },
-        { question_id: "q2", question_text: "Open late?", items: [{}] },
-      ]),
-    ).toEqual([
-      {
-        questionId: "q1",
-        text: "Do you travel to Henderson?",
-        author: "Asker",
-        askedAt: "2026-10-01T10:00:00.000Z",
-        answered: false,
-      },
-      {
-        questionId: "q2",
-        text: "Open late?",
-        author: null,
-        askedAt: null,
-        answered: true,
-      },
-    ]);
-  });
-
+describe("normalizeUpdates", () => {
   it("marks owner posts that were not in the previous list", () => {
     const rows = [
       {

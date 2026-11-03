@@ -66,8 +66,6 @@ describe("GBP watch MCP tools", () => {
       rating: { value: 5, reviewCount: 113, valueChange: null },
       latestReviews: [],
       newReviewCount: 0,
-      questionsAvailable: false,
-      unansweredQuestions: [],
       ownerUpdates: null,
       changes: [],
       driftFromExpected: [
@@ -101,7 +99,7 @@ describe("GBP watch MCP tools", () => {
 
   it("run_gbp_snapshot states its cost and runs in the project's market", async () => {
     expect(runGbpSnapshotTool.config.description).toMatch(
-      /spends credits: about \$0\.014 per run/,
+      /spends credits: about \$0\.009 per run/,
     );
     mocks.runSnapshot.mockResolvedValue({
       status: "checked",
@@ -109,7 +107,7 @@ describe("GBP watch MCP tools", () => {
       costUsd: 0.0138,
       changes: 0,
       drift: 1,
-      collected: { reviews: true, questions: true, updates: false },
+      collected: { reviews: true, updates: false },
     });
 
     const result = await runGbpSnapshotTool.handler(

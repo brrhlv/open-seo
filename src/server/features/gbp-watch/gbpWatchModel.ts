@@ -88,14 +88,6 @@ export type GbpReview = {
   isNew: boolean;
 };
 
-export type GbpQuestion = {
-  questionId: string | null;
-  text: string;
-  author: string | null;
-  askedAt: string | null;
-  answered: boolean;
-};
-
 export type GbpUpdate = {
   key: string;
   postedAt: string | null;
@@ -237,25 +229,6 @@ export function normalizeReviews(
       isNew:
         previousIds !== null && reviewId !== null && !previousIds.has(reviewId),
     };
-  });
-}
-
-export function normalizeQuestions(rows: unknown[]): GbpQuestion[] {
-  return rows.flatMap((row) => {
-    const text =
-      str(readPath(row, "question_text")) ??
-      str(readPath(row, "original_question_text"));
-    if (!text) return [];
-    const answers = readPath(row, "items");
-    return [
-      {
-        questionId: str(readPath(row, "question_id")),
-        text,
-        author: str(readPath(row, "profile_name")),
-        askedAt: dfsTimestamp(readPath(row, "timestamp")),
-        answered: Array.isArray(answers) && answers.length > 0,
-      },
-    ];
   });
 }
 

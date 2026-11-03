@@ -8,7 +8,6 @@ import {
   profileFromRow,
   sameProfileRun,
   readChanges,
-  readQuestions,
   readReviews,
   readUpdates,
 } from "./gbpSnapshotCodec";
@@ -66,13 +65,6 @@ export type GbpWatchView = {
   latestReviews: GbpReview[];
   /** New in the latest check; null when that check did not collect reviews. */
   newReviewCount: number | null;
-  questionsAvailable: boolean;
-  unansweredQuestions: {
-    questionId: string | null;
-    text: string;
-    author: string | null;
-    askedAt: string | null;
-  }[];
   ownerUpdates: {
     latestPostedAt: string | null;
     newCount: number;
@@ -209,7 +201,6 @@ export function buildGbpWatchView(
     (rows.map(readReviews).find((list) => list !== null) ?? []).map(
       (review) => ({ ...review, isNew: false }),
     );
-  const questions = rows.map(readQuestions).find((list) => list !== null) ?? [];
 
   return {
     tracked: config?.isActive ?? false,
@@ -227,10 +218,6 @@ export function buildGbpWatchView(
     newReviewCount: latestReviewList
       ? latestReviewList.filter((review) => review.isNew).length
       : null,
-    questionsAvailable: questions.length > 0,
-    unansweredQuestions: questions
-      .filter((question) => !question.answered)
-      .map(({ answered: _answered, ...question }) => question),
     ownerUpdates: updatesView(rows),
     changes: recentChanges(rows, now),
     driftFromExpected: driftWithSince(rows, config),

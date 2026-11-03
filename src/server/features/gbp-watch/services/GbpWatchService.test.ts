@@ -16,7 +16,6 @@ const mocks = vi.hoisted(() => ({
   snapshots: [] as GbpSnapshotRow[],
   business: {
     myBusinessInfo: vi.fn(),
-    questionsAnswers: vi.fn(),
     reviewsTaskPost: vi.fn(),
     updatesTaskPost: vi.fn(),
   },
@@ -84,14 +83,31 @@ function charge(usd: number) {
   mocks.onCost.current?.(usd);
 }
 
+// The SBLV seed from the spec (Bryan, 2026-11-02 and 2026-11-03): Photo booth
+// primary; Balloon artist, Event management company and Event planner are
+// accepted secondaries; no wedding, photographer or party-rental categories.
+const SBLV_EXPECTED = {
+  primaryCategory: "Photo booth",
+  allowedAdditionalCategories: [
+    "Balloon artist",
+    "Event management company",
+    "Event planner",
+  ],
+  forbiddenCategories: [
+    "Wedding service",
+    "Wedding photographer",
+    "Photographer",
+    "Photography service",
+    "Party equipment rental service",
+  ],
+  website: "https://socialboothlv.com/",
+};
+
 async function createWatch() {
   await GbpWatchService.setWatch({
     projectId: PROJECT,
     cid: "5590594803775798319",
-    expected: {
-      primaryCategory: "Photo booth",
-      forbiddenCategories: ["Party equipment rental service"],
-    },
+    expected: SBLV_EXPECTED,
     now: new Date("2026-11-02T12:00:00Z"),
   });
 }
@@ -114,10 +130,6 @@ beforeEach(() => {
   mocks.business.myBusinessInfo.mockImplementation(async () => {
     charge(0.0054);
     return structuredClone(profileFixture);
-  });
-  mocks.business.questionsAnswers.mockImplementation(async () => {
-    charge(0.0054);
-    return [];
   });
   mocks.business.reviewsTaskPost.mockImplementation(async () => {
     charge(0.0015);
@@ -157,28 +169,22 @@ describe("GbpWatchService", () => {
     ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
   });
 
-  it("stores the first run as a baseline with its real cost and the live drift", async () => {
+  it("stores the first run as a baseline with its real cost; party rental is the only drift", async () => {
     await createWatch();
     const result = await run(MON);
     expect(result).toMatchObject({
       status: "checked",
       changes: 0,
       drift: 1,
-      collected: { reviews: true, questions: true, updates: true },
+      collected: { reviews: true, updates: true },
     });
-    expect(result.costUsd).toBeCloseTo(0.0138, 6);
-    expect(mocks.business.questionsAnswers).toHaveBeenCalledWith(
-      expect.objectContaining({
-        keyword: "cid:5590594803775798319",
-        locationCoordinate: "36.2108236,-115.2695665,1000",
-      }),
-    );
+    // Profile + reviews + posts; no Q&A call (retired by Google, still billed).
+    expect(result.costUsd).toBeCloseTo(0.0084, 6);
 
     const view = await GbpWatchService.getWatch(PROJECT, MON);
     expect(view.profile?.primaryCategory).toBe("Photo booth");
     expect(view.newReviewCount).toBe(0);
     expect(view.latestReviews).toHaveLength(5);
-    expect(view.questionsAvailable).toBe(false);
     expect(view.driftFromExpected).toEqual([
       {
         field: "additionalCategories",
@@ -256,11 +262,7 @@ describe("GbpWatchService", () => {
     await run(MON);
     mocks.fetchTask.mockResolvedValue({ status: "pending", result: null });
     const gap = await run(NEXT_MON);
-    expect(gap.collected).toEqual({
-      reviews: false,
-      questions: true,
-      updates: false,
-    });
+    expect(gap.collected).toEqual({ reviews: false, updates: false });
     expect(mocks.snapshots[0]?.reviewsJson).toBeNull();
     const gapView = await GbpWatchService.getWatch(PROJECT, NEXT_MON);
     // Not "0 new": the latest check did not collect reviews.

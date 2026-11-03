@@ -26,9 +26,6 @@ export const gbpConfigs = sqliteTable(
     listingId: text("listing_id"),
     // The accepted state (gbpExpectedSchema): categories, website, hours.
     expectedJson: text("expected_json").notNull().default("{}"),
-    includeQuestions: integer("include_questions", { mode: "boolean" })
-      .notNull()
-      .default(true),
     scheduleInterval: text("schedule_interval", {
       enum: ["weekly", "manual"],
     })
@@ -77,7 +74,6 @@ export const gbpSnapshots = sqliteTable(
     totalPhotos: integer("total_photos"),
     isClaimed: integer("is_claimed", { mode: "boolean" }),
     reviewsJson: text("reviews_json"),
-    questionsJson: text("questions_json"),
     updatesJson: text("updates_json"),
     changesJson: text("changes_json").notNull().default("[]"),
     billingCostUsd: real("billing_cost_usd").notNull().default(0),
