@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   getPageRowsForAudit: vi.fn(),
   getIssueRowsForAudit: vi.fn(),
   getLighthouseRowsForAudit: vi.fn(),
+  getCached: vi.fn(),
+  setCached: vi.fn(),
 }));
 vi.mock("@/server/features/audit/repositories/auditReportQueries", () => ({
   getLatestAuditAtOrBefore: mocks.getLatestAuditAtOrBefore,
@@ -15,51 +17,63 @@ vi.mock("@/server/features/audit/repositories/auditPageQueries", () => ({
   getIssueRowsForAudit: mocks.getIssueRowsForAudit,
   getLighthouseRowsForAudit: mocks.getLighthouseRowsForAudit,
 }));
+vi.mock("@/server/lib/r2-cache", () => ({
+  getCached: mocks.getCached,
+  setCached: mocks.setCached,
+}));
 
 const NOW = new Date("2026-11-02T12:00:00.000Z");
 
-function issue(
+const page = (
+  id: string,
+  url: string,
+  critical = 0,
+  warning = 0,
+  info = 0,
+) => ({
+  id,
+  url,
+  statusCode: 200,
+  critical,
+  warning,
+  info,
+});
+const issue = (
   pageUrl: string,
   issueType: string,
   severity: string,
+  occurrences = 1,
   detailsJson: string | null = null,
-) {
-  return { pageUrl, issueType, severity, detailsJson };
-}
+) => ({ pageUrl, issueType, severity, occurrences, detailsJson });
+
+const AUDIT = {
+  id: "a1",
+  status: "completed",
+  startedAt: "2026-09-05 00:51:55",
+  completedAt: "2026-09-05T00:52:05.096Z",
+  pagesCrawled: 3,
+};
 
 describe("getAuditPagesSection", () => {
   beforeEach(() => {
-    mocks.getLatestAuditAtOrBefore.mockResolvedValue({
-      id: "a1",
-      status: "completed",
-      startedAt: "2026-09-05 00:51:55",
-      completedAt: "2026-09-05T00:52:05.096Z",
-      pagesCrawled: 3,
-    });
+    mocks.getCached.mockResolvedValue(null);
+    mocks.setCached.mockResolvedValue(undefined);
+    mocks.getLatestAuditAtOrBefore.mockResolvedValue(AUDIT);
+    // Worst first, as the SQL returns them.
     mocks.getPageRowsForAudit.mockResolvedValue([
-      { id: "p-home", url: "https://a.com/", statusCode: 200 },
-      { id: "p-clean", url: "https://a.com/about", statusCode: 200 },
-      { id: "p-bad", url: "https://a.com/services", statusCode: 200 },
+      page("p-bad", "https://a.com/services", 1, 0, 1),
+      page("p-home", "https://a.com/", 0, 0, 1),
+      page("p-clean", "https://a.com/about"),
     ]);
     mocks.getIssueRowsForAudit.mockResolvedValue([
-      issue("https://a.com/", "title-too-long", "info", '{"length":181}'),
+      issue("https://a.com/", "title-too-long", "info", 1, '{"length":181}'),
+      issue("https://a.com/services", "title-too-long", "info", 1, "not json"),
       issue(
         "https://a.com/services",
-        "broken-link",
+        "broken-internal-link",
         "critical",
+        2,
         '{"target":"/x"}',
-      ),
-      issue(
-        "https://a.com/services",
-        "broken-link",
-        "critical",
-        '{"target":"/y"}',
-      ),
-      issue(
-        "https://a.com/services",
-        "meta-description-too-long",
-        "info",
-        "not json",
       ),
     ]);
     mocks.getLighthouseRowsForAudit.mockResolvedValue([
@@ -78,12 +92,9 @@ describe("getAuditPagesSection", () => {
     ]);
   });
 
-  it("groups issues per page, worst pages first, with Lighthouse per strategy", async () => {
+  it("shapes pages with their issues and Lighthouse per strategy, and caches a completed audit", async () => {
     const section = await getAuditPagesSection("proj", NOW);
-    expect(mocks.getLatestAuditAtOrBefore).toHaveBeenCalledWith(
-      "proj",
-      NOW.toISOString(),
-    );
+    expect(mocks.getPageRowsForAudit).toHaveBeenCalledWith("a1", 251);
     expect(section).toMatchObject({
       status: "completed",
       auditId: "a1",
@@ -100,17 +111,12 @@ describe("getAuditPagesSection", () => {
       issueCounts: { critical: 1, warning: 0, info: 1 },
       issues: [
         {
-          issueType: "broken-link",
+          issueType: "broken-internal-link",
           severity: "critical",
           occurrences: 2,
           details: { target: "/x" },
         },
-        {
-          issueType: "meta-description-too-long",
-          severity: "info",
-          occurrences: 1,
-          details: null,
-        },
+        { issueType: "title-too-long", occurrences: 1, details: null },
       ],
       lighthouse: null,
     });
@@ -127,10 +133,37 @@ describe("getAuditPagesSection", () => {
       },
       desktop: null,
     });
-    expect(section.pages[2]).toMatchObject({
-      issues: [],
-      issueCounts: { critical: 0, warning: 0, info: 0 },
+    expect(section.pages[2]).toMatchObject({ issues: [] });
+    expect(mocks.setCached).toHaveBeenCalledWith(
+      "public-summary:audit-pages:v1:a1",
+      section,
+      30 * 24 * 60 * 60,
+    );
+  });
+
+  it("serves a cached completed audit without reading its pages", async () => {
+    const cached = await getAuditPagesSection("proj", NOW);
+    mocks.getPageRowsForAudit.mockClear();
+    mocks.getCached.mockResolvedValue(cached);
+    expect(await getAuditPagesSection("proj", NOW)).toEqual(cached);
+    expect(mocks.getPageRowsForAudit).not.toHaveBeenCalled();
+  });
+
+  it("never caches a running audit, and flags a cut list", async () => {
+    mocks.getLatestAuditAtOrBefore.mockResolvedValue({
+      ...AUDIT,
+      status: "running",
     });
+    mocks.getPageRowsForAudit.mockResolvedValue(
+      Array.from({ length: 251 }, (_, i) =>
+        page(`p${i}`, `https://a.com/${i}`),
+      ),
+    );
+    const section = await getAuditPagesSection("proj", NOW);
+    expect(section).toMatchObject({ status: "running", truncated: true });
+    expect(section.pages).toHaveLength(250);
+    expect(mocks.getCached).not.toHaveBeenCalled();
+    expect(mocks.setCached).not.toHaveBeenCalled();
   });
 
   it("reports status none before the first audit", async () => {
