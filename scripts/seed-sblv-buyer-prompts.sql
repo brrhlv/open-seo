@@ -7,7 +7,7 @@
 -- tracker due (2 prompts per tick, about 20 minutes). Expected cost of the
 -- first run: about $0.11 (8 prompts x ChatGPT $0.004 + AI Mode $0.004 +
 -- Perplexity ~$0.006). Re-running is safe: a prompt that already exists is
--- reactivated, not duplicated.
+-- only reactivated; its schedule and this month's attempts are untouched.
 
 INSERT INTO ai_visibility_prompts (id, project_id, prompt, next_run_at, created_at)
 VALUES
@@ -19,9 +19,7 @@ VALUES
   ('ce82b082-3f76-4cd7-8fad-f1a291c295dd', 'c65ed7c9-ee05-4b6d-a61f-8817c7a003ae', 'how much does a photo booth cost for a corporate event in Las Vegas', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), datetime('now', '+6 seconds')),
   ('7586036b-1b56-4d06-9402-e27f4bcb5ad6', 'c65ed7c9-ee05-4b6d-a61f-8817c7a003ae', 'photo booth for a company holiday party in Las Vegas', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), datetime('now', '+7 seconds')),
   ('9338e8d4-cafb-4101-adcc-a4821b9bcf14', 'c65ed7c9-ee05-4b6d-a61f-8817c7a003ae', 'Las Vegas photo booth vendor that meets venue COI and EAC requirements (Caesars Forum, Mandalay Bay)', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), datetime('now', '+8 seconds'))
-ON CONFLICT (project_id, prompt) DO UPDATE SET
-  is_active = 1,
-  next_run_at = excluded.next_run_at;
+ON CONFLICT (project_id, prompt) DO UPDATE SET is_active = 1;
 
 -- Check:
 -- SELECT id, prompt, next_run_at FROM ai_visibility_prompts
