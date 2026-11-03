@@ -78,3 +78,70 @@ export const aiVisibilitySnapshots = pgTable(
     ),
   ],
 );
+
+// PAI-255: see the SQLite schema for the column notes.
+const AI_VISIBILITY_PROMPT_PLATFORMS = [
+  "chat_gpt",
+  "google_ai_mode",
+  "perplexity",
+] as const;
+
+export const aiVisibilityPrompts = pgTable(
+  "ai_visibility_prompts",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    prompt: text("prompt").notNull(),
+    platformsJson: text("platforms_json")
+      .notNull()
+      .default('["chat_gpt","google_ai_mode","perplexity"]'),
+    isActive: boolean("is_active").notNull().default(true),
+    nextRunAt: timestampColumn("next_run_at"),
+    lastRunAt: timestampColumn("last_run_at"),
+    lastError: text("last_error"),
+    createdAt: timestampColumn("created_at").notNull().default(isoNow),
+  },
+  (table) => [
+    uniqueIndex("ai_visibility_prompts_project_prompt_idx").on(
+      table.projectId,
+      table.prompt,
+    ),
+    index("ai_visibility_prompts_due_idx").on(table.isActive, table.nextRunAt),
+  ],
+);
+
+export const aiVisibilityPromptResults = pgTable(
+  "ai_visibility_prompt_results",
+  {
+    id: serial("id").primaryKey(),
+    promptId: text("prompt_id")
+      .notNull()
+      .references(() => aiVisibilityPrompts.id, { onDelete: "cascade" }),
+    platform: text("platform", {
+      enum: AI_VISIBILITY_PROMPT_PLATFORMS,
+    }).notNull(),
+    period: text("period").notNull(),
+    status: text("status", { enum: ["ok", "error"] }).notNull(),
+    mentioned: boolean("mentioned"),
+    position: integer("position"),
+    brandsNamed: integer("brands_named"),
+    citedUrl: text("cited_url"),
+    citedUrlsJson: text("cited_urls_json").notNull().default("[]"),
+    competitorsJson: text("competitors_json").notNull().default("[]"),
+    excerpt: text("excerpt"),
+    model: text("model"),
+    error: text("error"),
+    attempts: integer("attempts").notNull().default(1),
+    costUsd: real("cost_usd").notNull().default(0),
+    capturedAt: timestampColumn("captured_at").notNull().default(isoNow),
+  },
+  (table) => [
+    uniqueIndex("ai_visibility_prompt_results_prompt_platform_period_idx").on(
+      table.promptId,
+      table.platform,
+      table.period,
+    ),
+  ],
+);

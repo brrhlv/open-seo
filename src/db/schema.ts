@@ -87,6 +87,8 @@ export const {
   backlinkSnapshots,
   aiVisibilityConfigs,
   aiVisibilitySnapshots,
+  aiVisibilityPrompts,
+  aiVisibilityPromptResults,
   projectContextSections,
   projectCompetitors,
   projectKeyPages,
