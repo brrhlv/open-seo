@@ -22,16 +22,15 @@ export const urlInspections = pgTable(
     lastCrawlTime: text("last_crawl_time"),
     crawledAs: text("crawled_as"),
     error: text("error"),
-    inspectedAt: text("inspected_at").notNull(),
+    inspectedAt: text("inspected_at"),
+    attemptedAt: text("attempted_at").notNull(),
+    nextCheckAt: text("next_check_at").notNull(),
   },
   (table) => [
     uniqueIndex("url_inspections_project_url_idx").on(
       table.projectId,
       table.url,
     ),
-    index("url_inspections_project_inspected_idx").on(
-      table.projectId,
-      table.inspectedAt,
-    ),
+    index("url_inspections_next_check_idx").on(table.nextCheckAt),
   ],
 );

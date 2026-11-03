@@ -11,8 +11,8 @@ import {
 } from "vitest";
 import type * as SchedulerModule from "./scheduledIndexInspections";
 
-// Real due query + upsert over in-memory SQLite; only the Google call
-// (GscService.inspectUrls) and the hosted-mode check are mocked.
+// Real due query, lease and writes over in-memory SQLite; only the Google
+// call (GscService.inspectUrls) and the hosted-mode check are mocked.
 
 vi.mock("cloudflare:workers", () => ({
   env: { DATABASE_PROVIDER: "d1" },
@@ -32,6 +32,8 @@ vi.mock("@/server/lib/runtime-env", () => ({
 }));
 
 const NOW = new Date("2026-11-02T10:00:00.000Z");
+const at = (minutes: number) =>
+  new Date(NOW.getTime() + minutes * 60_000).toISOString();
 
 let client: Client;
 let Scheduler: typeof SchedulerModule;
@@ -48,7 +50,8 @@ beforeAll(async () => {
       id text PRIMARY KEY NOT NULL, project_id text NOT NULL, url text NOT NULL,
       inspected_url text NOT NULL, verdict text, coverage_state text, indexing_state text,
       robots_txt_state text, page_fetch_state text, google_canonical text, user_canonical text,
-      last_crawl_time text, crawled_as text, error text, inspected_at text NOT NULL
+      last_crawl_time text, crawled_as text, error text, inspected_at text,
+      attempted_at text NOT NULL, next_check_at text NOT NULL
     );
     CREATE UNIQUE INDEX url_inspections_project_url_idx ON url_inspections (project_id, url);
   `);
@@ -71,9 +74,20 @@ function project(
   `;
 }
 
-async function stored() {
+/** A stored result for a page, due at `next`. */
+function stored(
+  projectId: string,
+  url: string,
+  next: string,
+  verdict = "PASS",
+) {
+  return `INSERT INTO url_inspections (id, project_id, url, inspected_url, verdict, coverage_state, inspected_at, attempted_at, next_check_at)
+    VALUES ('${projectId}:${url}', '${projectId}', '${url}', '${url}', '${verdict}', 'Submitted and indexed', '2026-11-01T09:00:00.000Z', '2026-11-01T09:00:00.000Z', '${next}');`;
+}
+
+async function rows() {
   const result = await client.execute(
-    "SELECT project_id, url, inspected_url, verdict, coverage_state, error, inspected_at FROM url_inspections ORDER BY project_id, url",
+    "SELECT project_id, url, inspected_url, verdict, coverage_state, error, inspected_at, attempted_at, next_check_at FROM url_inspections ORDER BY project_id, url",
   );
   return result.rows.map((row) => ({ ...row }));
 }
@@ -101,7 +115,7 @@ beforeEach(async () => {
 });
 
 describe("runScheduledIndexInspections", () => {
-  it("inspects key pages of live connected projects and stores the result", async () => {
+  it("inspects key pages of live connected projects and checks them again in a day", async () => {
     await client.executeMultiple(
       project("a", "sc-domain:a.com", [
         "https://a.com",
@@ -118,13 +132,14 @@ describe("runScheduledIndexInspections", () => {
       projectId: "a",
       urls: ["https://a.com/", "https://a.com/pricing"],
     });
-    expect(await stored()).toEqual([
+    expect(await rows()).toEqual([
       expect.objectContaining({
         url: "https://a.com",
         inspected_url: "https://a.com/",
         verdict: "PASS",
         error: null,
         inspected_at: NOW.toISOString(),
+        next_check_at: at(24 * 60),
       }),
       expect.objectContaining({
         url: "https://a.com/pricing",
@@ -133,25 +148,79 @@ describe("runScheduledIndexInspections", () => {
     ]);
   });
 
-  it("re-inspects only URLs older than a day, never-inspected first, capped per tick", async () => {
-    const pages = Array.from({ length: 10 }, (_, i) => `https://a.com/p${i}`);
+  it("takes never-inspected pages first, then the longest overdue, across projects, capped per tick", async () => {
+    const pages = Array.from({ length: 7 }, (_, i) => `https://a.com/p${i}`);
     await client.executeMultiple(`
       ${project("a", "sc-domain:a.com", pages)}
-      INSERT INTO url_inspections (id, project_id, url, inspected_url, inspected_at)
-        VALUES ('fresh', 'a', 'https://a.com/p0', 'https://a.com/p0', '2026-11-01T12:00:00.000Z'),
-               ('stale', 'a', 'https://a.com/p1', 'https://a.com/p1', '2026-11-01T09:00:00.000Z');
+      ${project("b", "sc-domain:b.com", ["https://b.com/old", "https://b.com/older", "https://b.com/fresh"])}
+      ${stored("a", "https://a.com/p0", at(-10))}
+      ${stored("b", "https://b.com/old", at(-60))}
+      ${stored("b", "https://b.com/older", at(-120))}
+      ${stored("b", "https://b.com/fresh", at(60))}
     `);
 
     await Scheduler.runScheduledIndexInspections(NOW);
 
-    const urls = mocks.inspectUrls.mock.calls[0]?.[0].urls ?? [];
+    const urls = mocks.inspectUrls.mock.calls.flatMap(([input]) => input.urls);
     expect(urls).toHaveLength(8);
+    // Six never-inspected pages of a, then b's two overdue ones, oldest first.
+    expect(urls).toContain("https://b.com/older");
+    expect(urls).toContain("https://b.com/old");
     expect(urls).not.toContain("https://a.com/p0");
-    // Eight never-inspected pages fill the tick before the stale one.
-    expect(urls).not.toContain("https://a.com/p1");
+    expect(urls).not.toContain("https://b.com/fresh");
   });
 
-  it("rebases key pages onto a URL-prefix property and stores out-of-property pages as failed", async () => {
+  it("keeps the last good verdict when a check fails, and retries in an hour", async () => {
+    await client.executeMultiple(`
+      ${project("a", "sc-domain:a.com", ["https://a.com/x", "https://a.com/y"])}
+      ${project("b", "sc-domain:b.com", ["https://b.com/z"])}
+      ${stored("a", "https://a.com/x", at(-5))}
+      ${stored("b", "https://b.com/z", at(-5), "NEUTRAL")}
+    `);
+    mocks.inspectUrls.mockImplementation((input) =>
+      input.projectId === "a"
+        ? Promise.resolve({
+            results: [
+              { url: "https://a.com/x", result: null, error: "Rate limit" },
+              { url: "https://a.com/y", result: null, error: "URL unknown" },
+            ],
+          })
+        : Promise.reject(new Error("grant revoked")),
+    );
+
+    await Scheduler.runScheduledIndexInspections(NOW);
+
+    expect(await rows()).toEqual([
+      expect.objectContaining({
+        url: "https://a.com/x",
+        verdict: "PASS",
+        coverage_state: "Submitted and indexed",
+        inspected_at: "2026-11-01T09:00:00.000Z",
+        error: "Rate limit",
+        attempted_at: NOW.toISOString(),
+        next_check_at: at(60),
+      }),
+      expect.objectContaining({
+        url: "https://a.com/y",
+        verdict: null,
+        inspected_at: null,
+        error: "URL unknown",
+      }),
+      expect.objectContaining({
+        url: "https://b.com/z",
+        verdict: "NEUTRAL",
+        error: "grant revoked",
+        next_check_at: at(60),
+      }),
+    ]);
+    mocks.inspectUrls.mockClear();
+    await Scheduler.runScheduledIndexInspections(new Date(at(30)));
+    expect(mocks.inspectUrls).not.toHaveBeenCalled();
+    await Scheduler.runScheduledIndexInspections(new Date(at(61)));
+    expect(mocks.inspectUrls).toHaveBeenCalled();
+  });
+
+  it("rebases key pages onto a URL-prefix property; a page outside it waits a day", async () => {
     await client.executeMultiple(
       project("n", "https://www.n.com/", [
         "https://n.com/services",
@@ -173,45 +242,34 @@ describe("runScheduledIndexInspections", () => {
       projectId: "b",
       urls: ["https://b.com/blog/post"],
     });
-    expect(await stored()).toContainEqual(
+    expect(await rows()).toContainEqual(
       expect.objectContaining({
         url: "https://b.com/about",
         error: "URL is outside the Search Console property",
+        next_check_at: at(24 * 60),
       }),
     );
   });
 
-  it("stores per-URL and whole-batch failures so they back off a day", async () => {
+  it("skips pages another tick has leased", async () => {
     await client.executeMultiple(
-      project("a", "sc-domain:a.com", ["https://a.com/x", "https://a.com/y"]) +
-        project("b", "sc-domain:b.com", ["https://b.com/z"]),
+      project("a", "sc-domain:a.com", ["https://a.com/x"]),
     );
-    mocks.inspectUrls.mockImplementation((input) =>
-      input.projectId === "a"
-        ? Promise.resolve({
-            results: [
-              pass("https://a.com/x"),
-              { url: "https://a.com/y", result: null, error: "URL unknown" },
-            ],
-          })
-        : Promise.reject(new Error("grant revoked")),
+    let release: () => void = () => {};
+    mocks.inspectUrls.mockImplementationOnce(
+      (input) =>
+        new Promise((resolve) => {
+          release = () => resolve({ results: input.urls.map(pass) });
+        }),
     );
 
+    const first = Scheduler.runScheduledIndexInspections(NOW);
+    await vi.waitFor(() => expect(mocks.inspectUrls).toHaveBeenCalledTimes(1));
     await Scheduler.runScheduledIndexInspections(NOW);
+    release();
+    await first;
 
-    expect(await stored()).toEqual([
-      expect.objectContaining({ url: "https://a.com/x", error: null }),
-      expect.objectContaining({ url: "https://a.com/y", error: "URL unknown" }),
-      expect.objectContaining({
-        url: "https://b.com/z",
-        error: "grant revoked",
-      }),
-    ]);
-    mocks.inspectUrls.mockClear();
-    await Scheduler.runScheduledIndexInspections(
-      new Date(NOW.getTime() + 60 * 60_000),
-    );
-    expect(mocks.inspectUrls).not.toHaveBeenCalled();
+    expect(mocks.inspectUrls).toHaveBeenCalledTimes(1);
   });
 
   it("does nothing in hosted mode", async () => {
