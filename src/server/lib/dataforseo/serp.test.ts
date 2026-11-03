@@ -213,3 +213,164 @@ describe("rank check task queue", () => {
     });
   });
 });
+
+// Mobile SERPs wrap many organic results in a Google redirect: domain
+// google.com, a google.com/goto URL, and the real site only in the breadcrumb.
+// Items below are trimmed from real mobile Las Vegas responses (SBLV-188).
+const GOTO_URL = "https://google.com/goto?url=CAESeAHrOzAVxvNGtZoPcNHU";
+
+function gotoItem(rankGroup: number, breadcrumb: string) {
+  return {
+    type: "organic",
+    rank_group: rankGroup,
+    domain: "google.com",
+    url: GOTO_URL,
+    breadcrumb,
+  };
+}
+
+async function checkRank(items: unknown[], targetDomain: string) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({
+        status_code: 20000,
+        tasks: [
+          {
+            id: "task-a",
+            status_code: 20000,
+            cost: 0,
+            path: ["v3", "serp", "google", "organic", "task_get", "advanced"],
+            result: [{ items }],
+          },
+        ],
+      }),
+    ),
+  );
+  const outcome = await fetchRankCheckTaskResult({
+    taskId: "task-a",
+    keywordId: "kw-1",
+    keyword: "photo booth las vegas",
+    targetDomain,
+  });
+  if (outcome.status !== "completed") throw new Error(outcome.status);
+  return { position: outcome.result.position, url: outcome.result.url };
+}
+
+describe("rank check on goto-wrapped mobile results", () => {
+  it("matches a goto result through its breadcrumb host", async () => {
+    // holiday party photo booth las vegas: socialboothlv.com is #15.
+    const result = await checkRank(
+      [
+        {
+          type: "organic",
+          rank_group: 1,
+          domain: "www.shutterboxphotobooth.com",
+          url: "https://www.shutterboxphotobooth.com/locations/las-vegas/",
+          breadcrumb: "https://www.shutterboxphotobooth.com",
+        },
+        gotoItem(2, "https://www.funphotoboothlv.com"),
+        gotoItem(3, "4 days ago"),
+        gotoItem(15, "https://socialboothlv.com"),
+      ],
+      "socialboothlv.com",
+    );
+
+    expect(result).toEqual({ position: 15, url: "https://socialboothlv.com/" });
+  });
+
+  it("does not match a lookalike domain", async () => {
+    // trade show photo booth las vegas, without the real #17 listing.
+    const result = await checkRank(
+      [
+        gotoItem(12, "1.4K+ followers"),
+        {
+          type: "organic",
+          rank_group: 20,
+          domain: "thesocialboothco.com",
+          url: "https://thesocialboothco.com/tradeshow",
+          breadcrumb: "https://thesocialboothco.com",
+        },
+      ],
+      "socialboothlv.com",
+    );
+
+    expect(result).toEqual({ position: null, url: null });
+  });
+
+  it("keeps a plain domain match unchanged", async () => {
+    // 360 photo booth rental las vegas: socialboothlv.com is #4.
+    const result = await checkRank(
+      [
+        gotoItem(1, "https://joysquad.com"),
+        gotoItem(3, "https://m.yelp.com"),
+        {
+          type: "organic",
+          rank_group: 4,
+          domain: "socialboothlv.com",
+          url: "https://socialboothlv.com/",
+          breadcrumb: "https://socialboothlv.com",
+        },
+      ],
+      "socialboothlv.com",
+    );
+
+    expect(result).toEqual({ position: 4, url: "https://socialboothlv.com/" });
+  });
+
+  it.each([
+    [
+      "https://socialboothlv.com › holiday-party-photo-booth",
+      "https://socialboothlv.com/holiday-party-photo-booth",
+    ],
+    [
+      "socialboothlv.com › blog › trade-show-booths",
+      "https://socialboothlv.com/blog/trade-show-booths",
+    ],
+    // Prettified or truncated segments are ambiguous: fall back to the root.
+    [
+      "https://socialboothlv.com › Photo Booths › 360 Booth...",
+      "https://socialboothlv.com/",
+    ],
+  ])("rebuilds the URL from breadcrumb %j", async (breadcrumb, url) => {
+    const result = await checkRank(
+      [gotoItem(7, breadcrumb)],
+      "socialboothlv.com",
+    );
+
+    expect(result).toEqual({ position: 7, url });
+  });
+
+  it("resolves a null-domain result from its breadcrumb", async () => {
+    const result = await checkRank(
+      [
+        {
+          type: "organic",
+          rank_group: 9,
+          domain: null,
+          url: null,
+          breadcrumb: "socialboothlv.com",
+        },
+      ],
+      "socialboothlv.com",
+    );
+
+    expect(result).toEqual({ position: 9, url: "https://socialboothlv.com/" });
+  });
+
+  it("still matches a subdomain through the breadcrumb", async () => {
+    // trade show photo booth las vegas: blog.studiozphotobooths.com is #10.
+    const result = await checkRank(
+      [
+        gotoItem(9, "https://parlorphotobooths.com"),
+        gotoItem(10, "https://blog.studiozphotobooths.com"),
+      ],
+      "studiozphotobooths.com",
+    );
+
+    expect(result).toEqual({
+      position: 10,
+      url: "https://blog.studiozphotobooths.com/",
+    });
+  });
+});
