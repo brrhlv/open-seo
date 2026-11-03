@@ -62,6 +62,7 @@ Every key is optional. Category names compare case-insensitively after trimming.
 | `title`, `primary_category`, `website`, `phone`, `address`, `description` | text null | profile fields |
 | `additional_categories_json` | text not null default `'[]'` | string array, Google's order |
 | `hours_json` | text null | normalized `{ day: ["HH:MM-HH:MM"] }`; null when Google shows no hours |
+| `latitude`, `longitude` | real null | the profile's pin (Q&A needs a coordinate) |
 | `rating` | real null, `review_count` integer null, `total_photos` integer null, `is_claimed` boolean null | |
 | `reviews_json` | text null | newest reviews collected this run (depth 10), each with `isNew`; null = not collected this run |
 | `questions_json` | text null | Q&A rows collected; null = not collected (off, or failed) |
