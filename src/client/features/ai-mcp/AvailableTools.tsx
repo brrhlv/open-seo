@@ -189,6 +189,22 @@ const toolCategories: ToolCategory[] = [
         description:
           "Check Google Maps rank at each point of a grid around a business.",
       },
+      {
+        name: "get_local_grid",
+        title: "Get stored local grid",
+        description:
+          "Read the stored monthly Maps grids with SoLV, ARP and ATRP.",
+      },
+      {
+        name: "create_local_grid_tracker",
+        title: "Create local grid tracker",
+        description: "Grid a business's Maps rank monthly for set keywords.",
+      },
+      {
+        name: "run_local_grid",
+        title: "Run local grid",
+        description: "Grid the tracked keywords now and store the result.",
+      },
     ],
   },
   {

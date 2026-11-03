@@ -24,6 +24,11 @@ import { runRankTrackerTool } from "@/server/mcp/tools/run-rank-tracker";
 import { createAiVisibilityTrackerTool } from "@/server/mcp/tools/create-ai-visibility-tracker";
 import { getAiVisibilityTool } from "@/server/mcp/tools/get-ai-visibility";
 import { runAiVisibilityCheckTool } from "@/server/mcp/tools/run-ai-visibility-check";
+import {
+  createLocalGridTrackerTool,
+  getLocalGridTool,
+  runLocalGridTool,
+} from "@/server/mcp/tools/local-grid-tools";
 import { getSerpResultsTool } from "@/server/mcp/tools/get-serp-results";
 import {
   getGoogleAnalyticsAudienceBreakdownTool,
@@ -192,6 +197,9 @@ export function createOpenSeoMcpServer(authProps: McpProps) {
   register(getBusinessUpdatesTool);
   register(listBusinessCategoriesTool);
   register(getLocalRankGridTool);
+  register(getLocalGridTool);
+  register(createLocalGridTrackerTool);
+  register(runLocalGridTool);
   register(getKeywordMetricsTool);
   register(getSearchConsolePerformanceTool);
   register(inspectUrlsTool);
