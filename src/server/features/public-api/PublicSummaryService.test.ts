@@ -21,6 +21,10 @@ const mocks = vi.hoisted(() => ({
   runReport: vi.fn(),
   getAiVisibilityConfig: vi.fn(),
   listRecentAiVisibilitySnapshots: vi.fn(),
+  getOpportunitiesSection: vi.fn(),
+  getAuditPagesSection: vi.fn(),
+  getIndexStatusSection: vi.fn(),
+  getGa4KeyEventsSection: vi.fn(),
 }));
 
 vi.mock("@/server/features/projects/services/ProjectService", () => ({
@@ -87,6 +91,19 @@ vi.mock(
   "@/server/features/project-context/repositories/ProjectContextRepository",
   () => ({ ProjectContextRepository: {} }),
 );
+// CLIENT-SBLV-194 sections have their own tests; here only their wiring.
+vi.mock("./sections/opportunities", () => ({
+  getOpportunitiesSection: mocks.getOpportunitiesSection,
+}));
+vi.mock("./sections/auditPages", () => ({
+  getAuditPagesSection: mocks.getAuditPagesSection,
+}));
+vi.mock("./sections/indexStatus", () => ({
+  getIndexStatusSection: mocks.getIndexStatusSection,
+}));
+vi.mock("./sections/ga4KeyEvents", () => ({
+  getGa4KeyEventsSection: mocks.getGa4KeyEventsSection,
+}));
 
 /** Stored share_of_voice_json for a target-only leaderboard. */
 function sovJson(targetPct: number) {
@@ -125,6 +142,12 @@ describe("PublicSummaryService.getSummary", () => {
     );
     mocks.getAiVisibilityConfig.mockResolvedValue(null);
     mocks.listRecentAiVisibilitySnapshots.mockResolvedValue([]);
+    mocks.getOpportunitiesSection.mockResolvedValue({ connected: false });
+    mocks.getAuditPagesSection.mockResolvedValue({ status: "none" });
+    mocks.getIndexStatusSection.mockResolvedValue({ connected: false });
+    mocks.getGa4KeyEventsSection.mockRejectedValue(
+      new Ga4ReportError("ga4_not_connected", "not connected"),
+    );
   });
 
   it("returns null for an unknown or archived project", async () => {
@@ -168,6 +191,28 @@ describe("PublicSummaryService.getSummary", () => {
         platforms: [],
         history: [],
       },
+      opportunities: { connected: false },
+      auditPages: { status: "none" },
+      indexStatus: { connected: false },
+    });
+  });
+
+  it("adds the v2 sections, each failing on its own", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.getOpportunitiesSection.mockRejectedValue(
+      new Ga4ReportError("ga4_quota_exhausted", "quota"),
+    );
+    mocks.getIndexStatusSection.mockRejectedValue(new Error("d1 down"));
+
+    const summary = await PublicSummaryService.getSummary(input);
+
+    expect(mocks.getOpportunitiesSection).toHaveBeenCalledWith("proj-a", NOW);
+    expect(mocks.getAuditPagesSection).toHaveBeenCalledWith("proj-a", NOW);
+    expect(summary).toMatchObject({
+      opportunities: { error: "ga4_quota_exhausted" },
+      auditPages: { status: "none" },
+      indexStatus: { error: "internal_error" },
+      ga4: { connected: false },
     });
   });
 
@@ -390,6 +435,7 @@ describe("PublicSummaryService.getSummary", () => {
     mocks.runReport.mockResolvedValue({
       rows: [{ sessionSourceMedium: "google / organic", sessions: 30 }],
     });
+    mocks.getGa4KeyEventsSection.mockResolvedValue({ events: [] });
 
     const summary = await PublicSummaryService.getSummary(input);
 
@@ -473,7 +519,33 @@ describe("PublicSummaryService.getSummary", () => {
         // oxlint-disable-next-line typescript/no-unsafe-assignment -- vitest matcher
         daily: expect.arrayContaining([{ date: "2026-09-24", sessions: 5 }]),
         sources: [{ source: "google", medium: "organic", sessions: 30 }],
+        keyEvents: { events: [] },
       },
+    });
+    expect(mocks.getGa4KeyEventsSection).toHaveBeenCalledWith(
+      "proj-a",
+      { start: "2026-08-29", end: "2026-09-25" },
+      NOW,
+    );
+  });
+
+  it("turns a key-events failure into ga4.keyEvents.error and keeps ga4", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.getOrganicOverview.mockResolvedValue({
+      current: null,
+      previous: null,
+      trend: [],
+    });
+    mocks.runReport.mockResolvedValue({ rows: [] });
+    mocks.getGa4KeyEventsSection.mockRejectedValue(
+      new Ga4ReportError("ga4_quota_exhausted", "quota"),
+    );
+
+    const summary = await PublicSummaryService.getSummary(input);
+
+    expect(summary?.ga4).toMatchObject({
+      connected: true,
+      keyEvents: { error: "ga4_quota_exhausted" },
     });
   });
 

@@ -28,6 +28,11 @@ import {
   type PublicSummaryRange,
 } from "./publicSummaryRange";
 import { toIsoTimestamp } from "./timestamps";
+// CLIENT-SBLV-194: summary v2 sections, one module each.
+import { getAuditPagesSection } from "./sections/auditPages";
+import { getGa4KeyEventsSection } from "./sections/ga4KeyEvents";
+import { getIndexStatusSection } from "./sections/indexStatus";
+import { getOpportunitiesSection } from "./sections/opportunities";
 
 // Read-only project summary for external dashboards (PAI-222). Every read is
 // D1 or first-party Google data — never a DataForSEO-metered path (no
@@ -323,7 +328,18 @@ async function getGsc(projectId: string, dates: SummaryDates) {
   }
 }
 
-async function getGa4(projectId: string, dates: SummaryDates) {
+async function getGa4(projectId: string, dates: SummaryDates, now: Date) {
+  // Settles on its own: a key-events failure is ga4.keyEvents = { error }.
+  // Unlinked is not logged; the overview already answers connected:false.
+  const keyEvents = Promise.allSettled([
+    getGa4KeyEventsSection(projectId, dates, now),
+  ]).then(([result]) =>
+    result.status === "rejected" &&
+    result.reason instanceof Ga4ReportError &&
+    result.reason.code === "ga4_not_connected"
+      ? { error: "ga4_not_connected" }
+      : unwrap("ga4.keyEvents", projectId, result),
+  );
   try {
     const [overview, sources] = await Promise.all([
       // Organic Search only (the SEO lens).
@@ -359,6 +375,7 @@ async function getGa4(projectId: string, dates: SummaryDates) {
         ...splitSourceMedium(String(row.sessionSourceMedium ?? "")),
         sessions: metric(row.sessions),
       })),
+      keyEvents: await keyEvents,
     };
   } catch (error) {
     if (error instanceof Ga4ReportError && error.code === "ga4_not_connected") {
@@ -381,15 +398,22 @@ async function getSummary(input: {
   const now = input.now ?? new Date();
   const dates = resolvePublicSummaryDates(input.range, now);
 
+  // Started first so they run beside the sections below, not after them.
+  const v2Sections = Promise.allSettled([
+    getOpportunitiesSection(project.id, now),
+    getAuditPagesSection(project.id, now),
+    getIndexStatusSection(project.id),
+  ]);
   const [rankings, backlinks, audit, gsc, ga4, aiVisibility] =
     await Promise.allSettled([
       getRankings(project.id, input.range),
       getBacklinks(project.id, project.domain),
       getAudit(project.id),
       getGsc(project.id, dates),
-      getGa4(project.id, dates),
+      getGa4(project.id, dates, now),
       getAiVisibility(project.id),
     ]);
+  const [opportunities, auditPages, indexStatus] = await v2Sections;
 
   return {
     project: { id: project.id, domain: project.domain },
@@ -401,6 +425,9 @@ async function getSummary(input: {
     gsc: unwrap("gsc", project.id, gsc),
     ga4: unwrap("ga4", project.id, ga4),
     aiVisibility: unwrap("aiVisibility", project.id, aiVisibility),
+    opportunities: unwrap("opportunities", project.id, opportunities),
+    auditPages: unwrap("auditPages", project.id, auditPages),
+    indexStatus: unwrap("indexStatus", project.id, indexStatus),
   };
 }
 
