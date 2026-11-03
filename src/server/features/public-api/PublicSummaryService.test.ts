@@ -191,6 +191,19 @@ describe("PublicSummaryService.getSummary", () => {
     });
   });
 
+  it("isolates a failing savedKeywords section (CLIENT-SBLV-196)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.listSavedKeywordsByProject.mockRejectedValue(new Error("d1 down"));
+
+    expect(await PublicSummaryService.getSummary(input)).toMatchObject({
+      savedKeywords: { error: "internal_error" },
+      audit: { status: "none" },
+      backlinks: { backlinks: 0 },
+      gsc: { connected: false },
+      aiVisibility: { tracked: false },
+    });
+  });
+
   it("turns a failing section into an error code without failing the others", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.getPerformance.mockRejectedValue(new GscApiError(500, "boom"));
