@@ -1,8 +1,6 @@
 import { toIsoTimestamp } from "@/server/features/public-api/timestamps";
-import {
-  LocalGridService,
-  type LocalGridCellView,
-} from "@/server/features/local-grid/services/LocalGridService";
+import type { LocalGridCellView } from "@/server/features/local-grid/services/localGridHistory";
+import { LocalGridService } from "@/server/features/local-grid/services/LocalGridService";
 
 /**
  * CLIENT-SBLV-191: the stored grid as the public summary's `localGrid`
@@ -28,6 +26,8 @@ export type LocalGridKeywordSummary = Figures & {
   zoom: number;
   device: "desktop" | "mobile";
   pointsSearched: number;
+  /** Points whose search failed (shown as unknown). */
+  pointsFailed: number;
   top3Count: number;
   top10Count: number;
   cells: LocalGridCellView[];
@@ -48,7 +48,10 @@ export type LocalGridKeywordSummary = Figures & {
 };
 
 type LocalGridSummary = {
+  /** A tracker exists (active or paused). */
   tracked: boolean;
+  /** The tracker exists but is paused; its stored grids are still returned. */
+  paused: boolean;
   target: {
     name: string | null;
     placeId: string | null;
@@ -68,7 +71,8 @@ export async function getLocalGridSummary(
 ): Promise<LocalGridSummary> {
   const { config, keywords } = await LocalGridService.getLatest(projectId);
   return {
-    tracked: config?.isActive ?? false,
+    tracked: config != null,
+    paused: config != null && !config.isActive,
     target: config
       ? {
           name: config.targetName,
@@ -93,6 +97,7 @@ export async function getLocalGridSummary(
       zoom: latest.zoom,
       device: latest.device,
       pointsSearched: latest.pointsSearched,
+      pointsFailed: latest.pointsFailed,
       pointsFound: latest.pointsFound,
       top3Count: latest.top3Count,
       top10Count: latest.top10Count,

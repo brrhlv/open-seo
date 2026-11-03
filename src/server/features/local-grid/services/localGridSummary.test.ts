@@ -83,6 +83,7 @@ describe("getLocalGridSummary", () => {
     const summary = await Summary.getLocalGridSummary(PROJECT);
     expect(summary).toMatchObject({
       tracked: true,
+      paused: false,
       target: { name: "Social Booth LV", placeId: "ChIJuy0J", cid: "559" },
       center: { latitude: 36.2108236, longitude: -115.2695665 },
       gridSize: 3,
@@ -96,6 +97,7 @@ describe("getLocalGridSummary", () => {
       period: "2026-11",
       zoom: 13,
       pointsSearched: 9,
+      pointsFailed: 0,
       pointsFound: 8,
       solvPct: 88.89,
       arp: 1,
@@ -112,5 +114,12 @@ describe("getLocalGridSummary", () => {
       error: false,
     });
     expect(kw?.previous?.cells[0]).toEqual({ row: 0, col: 0, rank: 4 });
+  });
+
+  it("a paused tracker keeps its stored grids", async () => {
+    await client.execute("UPDATE local_grid_configs SET is_active = 0");
+    const summary = await Summary.getLocalGridSummary(PROJECT);
+    expect(summary).toMatchObject({ tracked: true, paused: true });
+    expect(summary.keywords).toHaveLength(1);
   });
 });
