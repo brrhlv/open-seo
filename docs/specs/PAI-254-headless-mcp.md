@@ -104,6 +104,9 @@ The handler never creates users (unlike `ensureUserRecord` on first login).
   separate secrets are needed, Access keeps it off the public internet, and
   both can be revoked on their own (delete the token from the policy, or drop
   the hash from `OPENSEO_MCP_API_KEYS` and redeploy).
+- **Key and token are independent.** The key is not tied to the Access email
+  policy: removing Bryan's email from it does not revoke the key (revoke = rotate
+  the key and redeploy). Any allowlisted service token works with any listed key.
 - **No per-key scopes.** Self-host MCP has no read-only scope. A read-only
   mode would be a separate ticket.
 - **Rate limit.** The hosted `MCP_RATE_LIMIT` binding is not applied here.
