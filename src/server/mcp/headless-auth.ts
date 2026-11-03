@@ -109,9 +109,12 @@ async function isAllowedServiceToken(
     jwksByTeamDomain.set(teamDomain, jwks);
   }
   try {
+    // Access signs with RS256 and always sets exp; insist on both.
     const { payload } = await jwtVerify(token, jwks, {
       issuer: teamDomain,
       audience,
+      algorithms: ["RS256"],
+      requiredClaims: ["exp"],
     });
     const commonName = payload["common_name"];
     return (

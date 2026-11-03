@@ -67,14 +67,18 @@ async function sha256Hex(value: string) {
     .join("");
 }
 
-function accessJwt(claims: Record<string, unknown>, audience = AUD) {
-  return new SignJWT(claims)
+function accessJwt(
+  claims: Record<string, unknown>,
+  audience = AUD,
+  options: { signer?: CryptoKey; withExp?: boolean } = {},
+) {
+  const jwt = new SignJWT(claims)
     .setProtectedHeader({ alg: "RS256", kid: "k1" })
     .setIssuer(TEAM)
     .setAudience(audience)
-    .setIssuedAt()
-    .setExpirationTime("5m")
-    .sign(privateKey);
+    .setIssuedAt();
+  if (options.withExp !== false) jwt.setExpirationTime("5m");
+  return jwt.sign(options.signer ?? privateKey);
 }
 
 async function request(input: { jwt?: string | null; key?: string | null }) {
@@ -185,6 +189,30 @@ describe("handleHeadlessMcpRequest", () => {
     expect(response.status).toBe(403);
     expect(mocks.handleSelfHostedMcpForIdentity).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["is signed by a key outside the JWKS", { withExp: true, attacker: true }],
+    ["has no exp claim", { withExp: false, attacker: false }],
+  ])(
+    "rejects a service-token JWT that %s",
+    async (_label, { withExp, attacker }) => {
+      // Same kid as the real key: the attacker hopes for a lax lookup.
+      const signer = attacker
+        ? (await generateKeyPair("RS256")).privateKey
+        : undefined;
+      const jwt = await accessJwt({ common_name: CLIENT_ID }, AUD, {
+        signer,
+        withExp,
+      });
+      const response = await handleHeadlessMcpRequest(
+        await request({ jwt }),
+        env,
+        ctx,
+      );
+      expect(response.status).toBe(403);
+      expect(mocks.handleSelfHostedMcpForIdentity).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects a service token that is not on the allowlist", async () => {
     const jwt = await accessJwt({ common_name: "other.access" });
