@@ -5,20 +5,22 @@ import {
   type UrlInspectionRow,
 } from "@/server/features/gsc/repositories/UrlInspectionRepository";
 import { ProjectContextRepository } from "@/server/features/project-context/repositories/ProjectContextRepository";
+import { isHostedServerAuthMode } from "@/server/lib/runtime-env";
 import { toIsoTimestamp } from "../timestamps";
 
 // CLIENT-SBLV-194: stored URL Inspection of the project's key pages. Never
-// calls Google — the */5 cron (scheduledIndexInspections) refreshes the rows
-// at most once a day per URL.
-
-const DAY_MS = 24 * 60 * 60_000;
+// calls Google — the */5 cron (scheduledIndexInspections, self-host only)
+// refreshes the rows at most once a day per URL.
 
 type IndexState = "indexed" | "not_indexed" | "failed" | "pending";
 
+/** The last good verdict wins over a later failed check; a failure only
+ *  shows when there was never a verdict. */
 function stateOf(row: UrlInspectionRow | undefined): IndexState {
-  if (!row) return "pending";
-  if (row.error) return "failed";
-  return row.verdict === "PASS" ? "indexed" : "not_indexed";
+  if (row?.verdict) return row.verdict === "PASS" ? "indexed" : "not_indexed";
+  if (!row || (!row.error && !row.inspectedAt)) return "pending";
+  // An error, or a result without a verdict.
+  return "failed";
 }
 
 function toPage(url: string, row: UrlInspectionRow | undefined) {
@@ -40,12 +42,23 @@ function toPage(url: string, row: UrlInspectionRow | undefined) {
     ),
     lastCrawlTime: row?.lastCrawlTime ?? null,
     crawledAs: row?.crawledAs ?? null,
+    // When the result above was captured.
     inspectedAt: toIsoTimestamp(row?.inspectedAt),
+    // The last attempt and its error, if it failed.
+    checkedAt: row?.error ? toIsoTimestamp(row.attemptedAt) : null,
     error: row?.error ?? null,
   };
 }
 
+const latest = (values: (string | null)[]) =>
+  sort(
+    values.filter((v): v is string => v !== null),
+    (a, b) => a.localeCompare(b),
+  );
+
 export async function getIndexStatusSection(projectId: string) {
+  // Hosted mode never runs the inspection cron.
+  if (await isHostedServerAuthMode()) return { connected: false as const };
   const [connection, keyPages, rows] = await Promise.all([
     GscConnectionRepository.getByProjectId(projectId),
     ProjectContextRepository.listKeyPages(projectId),
@@ -58,13 +71,10 @@ export async function getIndexStatusSection(projectId: string) {
     keyPages.map((page) => toPage(page.url, byUrl.get(page.url))),
     (page) => page.url,
   );
-  const stamps = sort(
-    pages
-      .map((page) => page.inspectedAt)
-      .filter((stamp): stamp is string => stamp !== null),
-    (a, b) => a.localeCompare(b),
+  const inspected = latest(pages.map((page) => page.inspectedAt));
+  const nextChecks = latest(
+    keyPages.map((page) => toIsoTimestamp(byUrl.get(page.url)?.nextCheckAt)),
   );
-  const oldest = stamps[0];
   const counts = { indexed: 0, notIndexed: 0, failed: 0, pending: 0 };
   for (const page of pages) {
     if (page.state === "indexed") counts.indexed++;
@@ -74,10 +84,8 @@ export async function getIndexStatusSection(projectId: string) {
   }
   return {
     connected: true as const,
-    capturedAt: stamps.at(-1) ?? null,
-    nextCheckAfter: oldest
-      ? new Date(Date.parse(oldest) + DAY_MS).toISOString()
-      : null,
+    capturedAt: inspected.at(-1) ?? null,
+    nextCheckAfter: nextChecks[0] ?? null,
     counts,
     pages,
   };
