@@ -21,6 +21,7 @@ function comparisonRow(
 }
 
 type Input = { kind: string; breakdown?: string };
+/** byEvent = all channels with the previous period; byPage and landing = organic. */
 function reports(byEvent: unknown[], byPage: unknown[], landing: unknown[]) {
   mocks.runReport.mockImplementation((input: Input) =>
     Promise.resolve(
@@ -42,26 +43,23 @@ function reports(byEvent: unknown[], byPage: unknown[], landing: unknown[]) {
   );
 }
 
+const lead = (landingPage: string, keyEvents: number) => ({
+  eventName: "generate_lead",
+  hostName: "a.com",
+  landingPage,
+  keyEvents,
+});
+
 describe("getGa4KeyEventsSection", () => {
   beforeEach(() => {
     reports(
       [
-        comparisonRow("generate_lead", 5, 0),
-        comparisonRow("phone_click", 0, 3),
+        comparisonRow("generate_lead", 7, 2),
+        comparisonRow("phone_click", 0, 6),
       ],
       [
-        {
-          eventName: "generate_lead",
-          hostName: "a.com",
-          landingPage: "/corporate-events/",
-          keyEvents: 2,
-        },
-        {
-          eventName: "generate_lead",
-          hostName: "a.com",
-          landingPage: "/deep",
-          keyEvents: 1,
-        },
+        lead("/corporate-events/", 2),
+        lead("/deep", 1),
         {
           eventName: "phone_click",
           hostName: "a.com",
@@ -73,9 +71,17 @@ describe("getGa4KeyEventsSection", () => {
         {
           hostName: "a.com",
           landingPage: "/",
-          sessions: 40,
+          sessions: 30,
           keyEvents: 0,
           sessionKeyEventRate: 0,
+        },
+        // www and bare host for the same path are one page.
+        {
+          hostName: "www.a.com",
+          landingPage: "/",
+          sessions: 10,
+          keyEvents: 1,
+          sessionKeyEventRate: 0.1,
         },
         {
           hostName: "a.com",
@@ -84,35 +90,46 @@ describe("getGa4KeyEventsSection", () => {
           keyEvents: 2,
           sessionKeyEventRate: 0.095,
         },
-        {
-          hostName: "a.com",
-          landingPage: "(not set)",
-          sessions: 3,
-          keyEvents: 0,
-        },
+        { hostName: "a.com", landingPage: "(not set)", sessions: 3 },
       ],
     );
   });
 
-  it("asks GA4 for organic key events in the summary range", async () => {
+  it("compares events across all channels; pages stay organic", async () => {
     await getGa4KeyEventsSection("p", DATES, NOW);
     expect(mocks.runReport).toHaveBeenCalledWith(
       expect.objectContaining({
         kind: "key_events",
         breakdown: "event",
         comparePreviousPeriod: true,
-        channel: "organic_search",
+        channel: "all",
         startDate: DATES.start,
         endDate: DATES.end,
       }),
     );
+    expect(mocks.runReport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "landing_pages",
+        channel: "organic_search",
+      }),
+    );
   });
 
-  it("merges events into landing pages, most key events first, and flags silent events", async () => {
+  it("merges events into organic landing pages, www and bare host as one, and flags a silent event", async () => {
     const section = await getGa4KeyEventsSection("p", DATES, NOW);
     expect(section.events).toEqual([
-      { eventName: "generate_lead", keyEvents: 5, previousKeyEvents: 0 },
-      { eventName: "phone_click", keyEvents: 0, previousKeyEvents: 3 },
+      {
+        eventName: "generate_lead",
+        keyEvents: 7,
+        previousKeyEvents: 2,
+        organicKeyEvents: 3,
+      },
+      {
+        eventName: "phone_click",
+        keyEvents: 0,
+        previousKeyEvents: 6,
+        organicKeyEvents: 1,
+      },
     ]);
     expect(section.tracking).toEqual({
       status: "silent",
@@ -139,19 +156,34 @@ describe("getGa4KeyEventsSection", () => {
       {
         page: "a.com/",
         sessions: 40,
-        keyEvents: 0,
-        keyEventRate: 0,
+        keyEvents: 1,
+        keyEventRate: 0.025,
         events: [],
       },
     ]);
     expect(section.capturedAt).toBe(NOW.toISOString());
   });
 
-  it("says when the property has no key events at all", async () => {
+  it("does not call a low-volume event silent", async () => {
+    reports([comparisonRow("phone_click", 0, 4)], [], []);
+    const section = await getGa4KeyEventsSection("p", DATES, NOW);
+    expect(section.tracking.status).not.toBe("silent");
+  });
+
+  it("says when no key event counted on any channel", async () => {
     reports([], [], []);
     const section = await getGa4KeyEventsSection("p", DATES, NOW);
     expect(section.tracking).toEqual({
       status: "no_key_events",
+      silentEvents: [],
+    });
+  });
+
+  it("says when key events count, just not from organic search", async () => {
+    reports([comparisonRow("generate_lead", 4, 3)], [], []);
+    const section = await getGa4KeyEventsSection("p", DATES, NOW);
+    expect(section.tracking).toEqual({
+      status: "no_organic_key_events",
       silentEvents: [],
     });
   });
