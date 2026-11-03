@@ -78,7 +78,8 @@ type AuditPages = {
     issues: Array<{
       issueType: string;                      // e.g. "title-too-long"
       severity: "critical" | "warning" | "info";
-      details: Record<string, unknown> | null; // parsed details_json, e.g. { "length": 192 }
+      occurrences: number;                    // link-level types write one row per occurrence
+      details: Record<string, unknown> | null; // parsed details_json of the first row, e.g. { "length": 192 }
     }>;
     lighthouse: {
       mobile: LighthouseScores | null;
@@ -158,7 +159,7 @@ type Ga4KeyEvents =
     "pages": [
       { "url": "https://socialboothlv.com/services", "statusCode": 200,
         "issueCounts": { "critical": 0, "warning": 0, "info": 2 },
-        "issues": [ { "issueType": "meta-description-too-long", "severity": "info", "details": { "length": 192 } } ],
+        "issues": [ { "issueType": "meta-description-too-long", "severity": "info", "occurrences": 1, "details": { "length": 192 } } ],
         "lighthouse": null }
     ]
   },
