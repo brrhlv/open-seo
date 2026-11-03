@@ -160,6 +160,11 @@ type DataforseoRequestOptions = {
    * be replayed. Defaults to retrying idempotent reads on transient 5xx.
    */
   maxServerErrorRetries?: number;
+  /**
+   * Overrides the shared 60 s request budget for one slow endpoint (the
+   * ChatGPT scraper answers in up to ~105 s). Other callers keep the default.
+   */
+  signal?: AbortSignal;
 };
 
 async function requestDataforseo<TTask extends DataforseoTaskLike>(
@@ -179,6 +184,7 @@ async function requestDataforseo<TTask extends DataforseoTaskLike>(
       ...(method === "POST" ? { "Content-Type": "application/json" } : {}),
     },
     body: method === "POST" ? JSON.stringify(body) : undefined,
+    signal: options.signal,
   });
   const text = await response.text();
   if (text === "") return null;

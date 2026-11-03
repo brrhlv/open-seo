@@ -83,3 +83,78 @@ export const aiVisibilitySnapshots = sqliteTable(
     ),
   ],
 );
+
+// PAI-255: buyer prompts. A short per-project list of prompts asked of each AI
+// platform once a month; remove = deactivate so the history stays.
+export const AI_VISIBILITY_PROMPT_PLATFORMS = [
+  "chat_gpt",
+  "google_ai_mode",
+  "perplexity",
+] as const;
+
+export const aiVisibilityPrompts = sqliteTable(
+  "ai_visibility_prompts",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    prompt: text("prompt").notNull(),
+    // JSON array of AI_VISIBILITY_PROMPT_PLATFORMS keys.
+    platformsJson: text("platforms_json")
+      .notNull()
+      .default('["chat_gpt","google_ai_mode","perplexity"]'),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    nextRunAt: text("next_run_at"),
+    lastRunAt: text("last_run_at"),
+    lastError: text("last_error"),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`(current_timestamp)`),
+  },
+  (table) => [
+    uniqueIndex("ai_visibility_prompts_project_prompt_idx").on(
+      table.projectId,
+      table.prompt,
+    ),
+    index("ai_visibility_prompts_due_idx").on(table.isActive, table.nextRunAt),
+  ],
+);
+
+// One row per (prompt, platform, UTC month). A re-run in the same month
+// replaces the row; cost_usd and attempts accumulate.
+export const aiVisibilityPromptResults = sqliteTable(
+  "ai_visibility_prompt_results",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    promptId: text("prompt_id")
+      .notNull()
+      .references(() => aiVisibilityPrompts.id, { onDelete: "cascade" }),
+    platform: text("platform", {
+      enum: AI_VISIBILITY_PROMPT_PLATFORMS,
+    }).notNull(),
+    period: text("period").notNull(),
+    status: text("status", { enum: ["ok", "error"] }).notNull(),
+    mentioned: integer("mentioned", { mode: "boolean" }),
+    position: integer("position"),
+    brandsNamed: integer("brands_named"),
+    citedUrl: text("cited_url"),
+    citedUrlsJson: text("cited_urls_json").notNull().default("[]"),
+    competitorsJson: text("competitors_json").notNull().default("[]"),
+    excerpt: text("excerpt"),
+    model: text("model"),
+    error: text("error"),
+    attempts: integer("attempts").notNull().default(1),
+    costUsd: real("cost_usd").notNull().default(0),
+    capturedAt: text("captured_at")
+      .notNull()
+      .default(sql`(current_timestamp)`),
+  },
+  (table) => [
+    uniqueIndex("ai_visibility_prompt_results_prompt_platform_period_idx").on(
+      table.promptId,
+      table.platform,
+      table.period,
+    ),
+  ],
+);

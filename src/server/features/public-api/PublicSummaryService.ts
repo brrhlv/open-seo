@@ -28,6 +28,7 @@ import {
 } from "./publicSummaryRange";
 import { getSavedKeywordsSection } from "./sections/savedKeywords";
 import { getLocalGridSection } from "./sections/localGrid";
+import { getAiVisibilityPromptsSection } from "./sections/aiVisibilityPrompts";
 import { toIsoTimestamp } from "./timestamps";
 // CLIENT-SBLV-194: summary v2 sections, one module each.
 import { getAuditPagesSection } from "./sections/auditPages";
@@ -242,6 +243,8 @@ async function getAiVisibility(projectId: string) {
       citedPages: point.citedPages,
       shareOfVoicePct: point.shareOfVoicePct,
     })),
+    // PAI-255: buyer prompts; fails on its own as { error }.
+    prompts: await getAiVisibilityPromptsSection(projectId),
   };
 }
 

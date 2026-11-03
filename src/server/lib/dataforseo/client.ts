@@ -55,6 +55,10 @@ import {
   fetchLlmResponse,
   fetchLlmTopPages,
 } from "@/server/lib/dataforseo/ai";
+import {
+  fetchChatGptScraperAnswer,
+  fetchGoogleAiModeAnswer,
+} from "@/server/lib/dataforseo/ai-prompts";
 import { isHostedServerAuthMode } from "@/server/lib/runtime-env";
 import { AppError } from "@/server/lib/errors";
 
@@ -175,6 +179,13 @@ export function createDataforseoClient(
       topPages: meter(ctx, fetchLlmTopPages),
       crossAggregatedMetrics: meter(ctx, fetchLlmCrossAggregatedMetrics),
       llmResponse: meter(ctx, fetchLlmResponse),
+      // PAI-255 buyer prompts.
+      chatGptScraper: meter(
+        ctx,
+        fetchChatGptScraperAnswer,
+        "ai_prompt_responses",
+      ),
+      googleAiMode: meter(ctx, fetchGoogleAiModeAnswer, "ai_prompt_responses"),
     },
   } as const;
 }

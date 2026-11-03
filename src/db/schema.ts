@@ -108,6 +108,8 @@ export const {
   localGridCells,
   gbpConfigs,
   gbpSnapshots,
+  aiVisibilityPrompts,
+  aiVisibilityPromptResults,
   projectContextSections,
   projectCompetitors,
   projectKeyPages,

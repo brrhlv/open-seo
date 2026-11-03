@@ -228,6 +228,8 @@ export default {
       return;
     }
 
+    // PAI-255: the AI-visibility prompt phase checks how much of the tick is left.
+    const tickStartedAtMs = Date.now();
     // Watchdog first: reconcile audits stuck in "running" whose workflow died
     // without reaching mark-failed (OOM/CPU kills, expired instances). Runs
     // before the rank loop so a slow tick can't delay or starve it. Its
@@ -246,7 +248,9 @@ export default {
     // DataForSEO response can't delay rank checks; its failure can't
     // suppress them either.
     try {
-      await withPgClient(() => runScheduledAiVisibilityChecks());
+      await withPgClient(() =>
+        runScheduledAiVisibilityChecks(new Date(), tickStartedAtMs),
+      );
     } catch (err) {
       console.error("[cron] AI visibility checks failed:", err);
     }
