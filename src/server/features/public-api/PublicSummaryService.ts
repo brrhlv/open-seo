@@ -27,6 +27,7 @@ import {
   resolvePublicSummaryDates,
   type PublicSummaryRange,
 } from "./publicSummaryRange";
+import { getLocalGridSection } from "./sections/localGrid";
 import { toIsoTimestamp } from "./timestamps";
 
 // Read-only project summary for external dashboards (PAI-222). Every read is
@@ -380,6 +381,10 @@ async function getSummary(input: {
   const { project } = found;
   const now = input.now ?? new Date();
   const dates = resolvePublicSummaryDates(input.range, now);
+  // CLIENT-SBLV-191, started before the others so it runs alongside them.
+  const localGridPending = Promise.allSettled([
+    getLocalGridSection(project.id),
+  ]);
 
   const [rankings, backlinks, audit, gsc, ga4, aiVisibility] =
     await Promise.allSettled([
@@ -401,6 +406,7 @@ async function getSummary(input: {
     gsc: unwrap("gsc", project.id, gsc),
     ga4: unwrap("ga4", project.id, ga4),
     aiVisibility: unwrap("aiVisibility", project.id, aiVisibility),
+    localGrid: unwrap("localGrid", project.id, (await localGridPending)[0]),
   };
 }
 
