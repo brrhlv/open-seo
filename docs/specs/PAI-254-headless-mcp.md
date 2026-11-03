@@ -39,10 +39,10 @@ the `apikey` table would do nothing.
 A second MCP entry point, `POST https://seo.bryanrivera.ai/mcp/headless`,
 with two independent gates. Both must pass.
 
-| Gate | Where | Checks |
-|---|---|---|
-| 1. Cloudflare Access | edge | New path app `seo.bryanrivera.ai/mcp/headless`, one `non_identity` policy whose only include is service token `pai-openseo-mcp`. No email policy, no bypass. |
-| 2. App | worker | (a) the Access JWT verifies against `TEAM_DOMAIN` + `MCP_HEADLESS_POLICY_AUD` (the new app's AUD, not the email app's) and carries a `common_name` from `MCP_HEADLESS_SERVICE_TOKEN_CLIENT_IDS`; (b) an `oseo_` key (Bearer or `x-api-key`) whose SHA-256 is in `OPENSEO_MCP_API_KEYS`, bound to one existing user id. |
+| Gate                 | Where  | Checks                                                                                                                                                                                                                                                                                                                 |
+| -------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Cloudflare Access | edge   | New path app `seo.bryanrivera.ai/mcp/headless`, one `non_identity` policy whose only include is service token `pai-openseo-mcp`. No email policy, no bypass.                                                                                                                                                           |
+| 2. App               | worker | (a) the Access JWT verifies against `TEAM_DOMAIN` + `MCP_HEADLESS_POLICY_AUD` (the new app's AUD, not the email app's) and carries a `common_name` from `MCP_HEADLESS_SERVICE_TOKEN_CLIENT_IDS`; (b) an `oseo_` key (Bearer or `x-api-key`) whose SHA-256 is in `OPENSEO_MCP_API_KEYS`, bound to one existing user id. |
 
 After both gates the request runs the same self-host MCP server as `/mcp`,
 as Bryan's user (`c405dd23-…`, bryan@bryanrivera.ai) in the shared
@@ -65,13 +65,13 @@ OAuth on `/mcp` untouched. Nothing about the interactive path changes.
 
 ### Fail-closed behavior
 
-| Condition | Response |
-|---|---|
-| `MCP_HEADLESS_POLICY_AUD`, `TEAM_DOMAIN` or `OPENSEO_MCP_API_KEYS` unset | 404 (feature off) |
-| No / bad / wrong-AUD Access JWT, or JWT without an allowed `common_name` (for example Bryan's browser JWT from the email app on workers.dev) | 403 `{"error":"access_denied"}` |
-| Key missing, not `oseo_`, too long or not in the hash list | 401 `{"error":"invalid_api_key"}` |
-| Key is valid but the bound user row is gone | 401 `{"error":"invalid_api_key"}` |
-| Anything else thrown | 500 `{"error":"internal_error"}` |
+| Condition                                                                                                                                    | Response                          |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `MCP_HEADLESS_POLICY_AUD`, `TEAM_DOMAIN` or `OPENSEO_MCP_API_KEYS` unset                                                                     | 404 (feature off)                 |
+| No / bad / wrong-AUD Access JWT, or JWT without an allowed `common_name` (for example Bryan's browser JWT from the email app on workers.dev) | 403 `{"error":"access_denied"}`   |
+| Key missing, not `oseo_`, too long or not in the hash list                                                                                   | 401 `{"error":"invalid_api_key"}` |
+| Key is valid but the bound user row is gone                                                                                                  | 401 `{"error":"invalid_api_key"}` |
+| Anything else thrown                                                                                                                         | 500 `{"error":"internal_error"}`  |
 
 The handler never creates users (unlike `ensureUserRecord` on first login).
 
@@ -88,11 +88,11 @@ The handler never creates users (unlike `ensureUserRecord` on first login).
 
 ### New worker env (all via `.env.selfhost` → `alchemy.run.ts`)
 
-| Name | Kind | Value |
-|---|---|---|
-| `OPENSEO_MCP_API_KEYS` | secret | `sha256(key):c405dd23-49d9-5d3c-82de-c292d46c46fe` |
-| `MCP_HEADLESS_POLICY_AUD` | var | AUD tag of the new path app |
-| `MCP_HEADLESS_SERVICE_TOKEN_CLIENT_IDS` | var | client id of `pai-openseo-mcp` (`….access`) |
+| Name                                    | Kind   | Value                                              |
+| --------------------------------------- | ------ | -------------------------------------------------- |
+| `OPENSEO_MCP_API_KEYS`                  | secret | `sha256(key):c405dd23-49d9-5d3c-82de-c292d46c46fe` |
+| `MCP_HEADLESS_POLICY_AUD`               | var    | AUD tag of the new path app                        |
+| `MCP_HEADLESS_SERVICE_TOKEN_CLIENT_IDS` | var    | client id of `pai-openseo-mcp` (`….access`)        |
 
 `TEAM_DOMAIN` is already derived by alchemy for the self-host stage.
 
@@ -116,15 +116,33 @@ The handler never creates users (unlike `ensureUserRecord` on first login).
 
 ## Access changes (made in this ticket, safe before deploy)
 
-1. Service token `pai-openseo-mcp` (duration 8760h).
-2. Reusable policy `openseo mcp headless service token` (`non_identity`,
-   include = that token only).
-3. Self-hosted app `open-seo MCP headless (service token)`, domain
-   `seo.bryanrivera.ai/mcp/headless`, that policy only, `app_launcher_visible: false`.
+Created 2026-11-03 with the alchemy OAuth token:
 
-Before the deploy, the worker serves `/mcp/headless` with the normal app
-router, which rejects the service-token JWT. Nothing new is reachable.
-The email app `0f0045d6-…` and its policy are not modified.
+1. Service token `pai-openseo-mcp`, id `bdc0ab7d-e09b-41d3-b9db-1626c5ab3827`,
+   duration 8760h, **expires 2027-11-03T07:30:27Z**.
+2. Policy `openseo mcp headless service token`, id
+   `65d067ba-3f64-4ee9-bd46-89e25b86f89d` (`non_identity`, include = that
+   token only).
+3. Self-hosted app `open-seo MCP headless (service token)`, id
+   `e02e29e5-7c28-4bc3-8c50-318f1af1c602`, domain
+   `seo.bryanrivera.ai/mcp/headless`, that policy only,
+   `app_launcher_visible: false`, session 24h.
+
+Checked live after creation:
+
+- no headers on `/mcp/headless` → 403 (Access);
+- service token on `/mcp/headless` → passes Access and reaches the worker.
+  Before the deploy the worker answers with the normal app router (500
+  `{"error":"Only HTML requests are supported here"}` for JSON). No data;
+- service token on `/mcp` → 401 (email app; the token is not valid there);
+- the service-token JWT has `iss` = the team domain, `aud` = the new app's
+  AUD, `common_name` = the token's client id, `sub` = "" and no `email`.
+  That is what the worker checks;
+- email app `0f0045d6-…`: domains, destinations, Managed OAuth config,
+  `updated_at` and its single policy `7fd5c3ea-…` unchanged.
+
+Rollback: delete app `e02e29e5-…`, then policy `65d067ba-…`, then token
+`bdc0ab7d-…`. Remove the three env lines from `.env.selfhost` and redeploy.
 
 ## Rollout
 
