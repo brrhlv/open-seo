@@ -20,11 +20,11 @@ PAI-217 tracks LLM Mentions, DataForSEO's dataset of prompts that already mentio
 
 ## Endpoints chosen (cheapest reliable per platform)
 
-| Platform key | DataForSEO endpoint | Price | Observed 2026-11-02 (8 prompts) | Why |
-|---|---|---|---|---|
-| `chat_gpt` | `POST /v3/ai_optimization/chat_gpt/llm_scraper/live/advanced` | $0.004 per result (live) | $0.004 each, 14–105 s | This is what a buyer sees on chatgpt.com, with ordered `brand_entities`, `sources` and inline links. `llm_responses` on gpt-5 costs $0.0006 plus tokens (≥ $0.01 with web search) and returns the API model, not the consumer product. |
-| `google_ai_mode` | `POST /v3/serp/google/ai_mode/live/advanced` | $0.004 per SERP (live) | $0.004 each, 8–21 s | AI Mode always answers. An AI Overview appears only on some organic SERPs and costs extra to expand. |
-| `perplexity` | `POST /v3/ai_optimization/perplexity/llm_responses/live`, `model_name: "sonar"`, `web_search: true`, `web_search_country_iso_code: "US"`, `max_output_tokens: 1024` | $0.0006 per task plus tokens | $0.0058–0.0061 each | There is no Perplexity scraper. `sonar` is the cheapest Sonar model. The answer carries `[n]` citation markers that point into `annotations`. |
+| Platform key     | DataForSEO endpoint                                                                                                                                                 | Price                        | Observed 2026-11-02 (8 prompts) | Why                                                                                                                                                                                                                                    |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `chat_gpt`       | `POST /v3/ai_optimization/chat_gpt/llm_scraper/live/advanced`                                                                                                       | $0.004 per result (live)     | $0.004 each, 14–105 s           | This is what a buyer sees on chatgpt.com, with ordered `brand_entities`, `sources` and inline links. `llm_responses` on gpt-5 costs $0.0006 plus tokens (≥ $0.01 with web search) and returns the API model, not the consumer product. |
+| `google_ai_mode` | `POST /v3/serp/google/ai_mode/live/advanced`                                                                                                                        | $0.004 per SERP (live)       | $0.004 each, 8–21 s             | AI Mode always answers. An AI Overview appears only on some organic SERPs and costs extra to expand.                                                                                                                                   |
+| `perplexity`     | `POST /v3/ai_optimization/perplexity/llm_responses/live`, `model_name: "sonar"`, `web_search: true`, `web_search_country_iso_code: "US"`, `max_output_tokens: 1024` | $0.0006 per task plus tokens | $0.0058–0.0061 each             | There is no Perplexity scraper. `sonar` is the cheapest Sonar model. The answer carries `[n]` citation markers that point into `annotations`.                                                                                          |
 
 Market: US (`location_code` 2840, `en`), the same as PAI-217. The prompts name Las Vegas themselves.
 
@@ -32,12 +32,12 @@ Market: US (`location_code` 2840, `en`), the same as PAI-217. The prompts name L
 
 ## Cost per month
 
-| Scope | ChatGPT | AI Mode | Perplexity | Total |
-|---|---|---|---|---|
-| Per prompt (3 platforms) | $0.004 | $0.004 | ~$0.006 | **~$0.014** |
-| SBLV, 8 prompts | $0.032 | $0.032 | $0.048 | **~$0.11** |
-| All 10 trackers at 8 prompts each | | | | ~$1.12 |
-| Worst case per prompt in a month (3 attempts, every platform fails and is billed) | | | | $0.042 |
+| Scope                                                                             | ChatGPT | AI Mode | Perplexity | Total       |
+| --------------------------------------------------------------------------------- | ------- | ------- | ---------- | ----------- |
+| Per prompt (3 platforms)                                                          | $0.004  | $0.004  | ~$0.006    | **~$0.014** |
+| SBLV, 8 prompts                                                                   | $0.032  | $0.032  | $0.048     | **~$0.11**  |
+| All 10 trackers at 8 prompts each                                                 |         |         |            | ~$1.12      |
+| Worst case per prompt in a month (3 attempts, every platform fails and is billed) |         |         |            | $0.042      |
 
 Fixture run 2026-11-02: 23 calls cost $0.1077 (7 ChatGPT, 8 AI Mode, 8 Perplexity). ChatGPT prompt 1 was reused from SBLV-188 (`$0.004`).
 
@@ -47,17 +47,17 @@ Both tables live in `src/db/ai-visibility.schema.ts` and `src/db/pg/ai-visibilit
 
 ### `ai_visibility_prompts`
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | text PK | UUID |
-| `project_id` | text, FK `projects.id`, on delete cascade | |
-| `prompt` | text, not null | Trimmed, inner whitespace collapsed, 3–300 characters |
-| `platforms_json` | text, not null, default `'["chat_gpt","google_ai_mode","perplexity"]'` | Array of platform keys. Zod-validated on read; unknown keys are dropped. |
-| `is_active` | boolean, not null, default true | Remove = deactivate. History is kept, and adding the same text again reactivates the row. |
-| `next_run_at` | text, nullable | The cron runs a prompt when `next_run_at <= now` |
-| `last_run_at` | text, nullable | |
-| `last_error` | text, nullable | |
-| `created_at` | text, default now | |
+| Column           | Type                                                                   | Notes                                                                                     |
+| ---------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `id`             | text PK                                                                | UUID                                                                                      |
+| `project_id`     | text, FK `projects.id`, on delete cascade                              |                                                                                           |
+| `prompt`         | text, not null                                                         | Trimmed, inner whitespace collapsed, 3–300 characters                                     |
+| `platforms_json` | text, not null, default `'["chat_gpt","google_ai_mode","perplexity"]'` | Array of platform keys. Zod-validated on read; unknown keys are dropped.                  |
+| `is_active`      | boolean, not null, default true                                        | Remove = deactivate. History is kept, and adding the same text again reactivates the row. |
+| `next_run_at`    | text, nullable                                                         | The cron runs a prompt when `next_run_at <= now`                                          |
+| `last_run_at`    | text, nullable                                                         |                                                                                           |
+| `last_error`     | text, nullable                                                         |                                                                                           |
+| `created_at`     | text, default now                                                      |                                                                                           |
 
 Indexes: unique `(project_id, prompt)` and `(is_active, next_run_at)`.
 
@@ -67,25 +67,25 @@ Limit: 10 active prompts per project. `add` rejects more than that. Ten prompts 
 
 One row per (prompt, platform, run). A run is the UTC calendar month (`period`, `YYYY-MM`), the same as PAI-217 snapshots. A re-run in the same month replaces the row. `cost_usd` and `attempts` accumulate.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | integer PK (serial in PG) | |
-| `prompt_id` | text, FK `ai_visibility_prompts.id`, on delete cascade | |
-| `platform` | text enum `chat_gpt`, `google_ai_mode`, `perplexity` | |
-| `period` | text `YYYY-MM` | The run |
-| `status` | text enum `ok`, `error` | |
-| `mentioned` | boolean, nullable | Null on error |
-| `position` | integer, nullable | 1-based. Null when not mentioned. |
-| `brands_named` | integer, nullable | How many distinct brands the answer named (the denominator for "#2 of 6") |
-| `cited_url` | text, nullable | The first cited or linked URL on the target's domain |
-| `cited_urls_json` | text, default `'[]'` | Every cited source URL, deduped, in order, at most 20 |
-| `competitors_json` | text, default `'[]'` | `[{domain, name, position}]`, tracked competitors the answer named, in order |
-| `excerpt` | text, nullable | About 400 characters around the first target mention, or the answer's opening when not mentioned. Markdown images stripped. |
-| `model` | text, nullable | The `model` / `model_name` DataForSEO reports (for example `gpt-6`, `sonar`) |
-| `error` | text, nullable | |
-| `attempts` | integer, default 1 | Incremented on each upsert in the same period |
-| `cost_usd` | real, default 0 | Accumulates |
-| `captured_at` | text, default now | |
+| Column             | Type                                                   | Notes                                                                                                                       |
+| ------------------ | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| `id`               | integer PK (serial in PG)                              |                                                                                                                             |
+| `prompt_id`        | text, FK `ai_visibility_prompts.id`, on delete cascade |                                                                                                                             |
+| `platform`         | text enum `chat_gpt`, `google_ai_mode`, `perplexity`   |                                                                                                                             |
+| `period`           | text `YYYY-MM`                                         | The run                                                                                                                     |
+| `status`           | text enum `ok`, `error`                                |                                                                                                                             |
+| `mentioned`        | boolean, nullable                                      | Null on error                                                                                                               |
+| `position`         | integer, nullable                                      | 1-based. Null when not mentioned.                                                                                           |
+| `brands_named`     | integer, nullable                                      | How many distinct brands the answer named (the denominator for "#2 of 6")                                                   |
+| `cited_url`        | text, nullable                                         | The first cited or linked URL on the target's domain                                                                        |
+| `cited_urls_json`  | text, default `'[]'`                                   | Every cited source URL, deduped, in order, at most 20                                                                       |
+| `competitors_json` | text, default `'[]'`                                   | `[{domain, name, position}]`, tracked competitors the answer named, in order                                                |
+| `excerpt`          | text, nullable                                         | About 400 characters around the first target mention, or the answer's opening when not mentioned. Markdown images stripped. |
+| `model`            | text, nullable                                         | The `model` / `model_name` DataForSEO reports (for example `gpt-6`, `sonar`)                                                |
+| `error`            | text, nullable                                         |                                                                                                                             |
+| `attempts`         | integer, default 1                                     | Incremented on each upsert in the same period                                                                               |
+| `cost_usd`         | real, default 0                                        | Accumulates                                                                                                                 |
+| `captured_at`      | text, default now                                      |                                                                                                                             |
 
 Indexes: unique `(prompt_id, platform, period)`.
 
@@ -99,10 +99,10 @@ Each platform response is first normalized into:
 
 ```ts
 type NormalizedAnswer = {
-  text: string;                                // answer markdown, images removed
-  links: { url: string; offset: number }[];    // inline links and resolved [n] markers, in text order
-  sources: string[];                           // cited source URLs, in order
-  entities: string[];                          // platform-tagged brand names, in order (ChatGPT only)
+  text: string; // answer markdown, images removed
+  links: { url: string; offset: number }[]; // inline links and resolved [n] markers, in text order
+  sources: string[]; // cited source URLs, in order
+  entities: string[]; // platform-tagged brand names, in order (ChatGPT only)
   model: string | null;
 };
 ```
@@ -144,14 +144,18 @@ Additive key on the existing `aiVisibility` object. It is built in `src/server/f
 type PromptPlatform = "chat_gpt" | "google_ai_mode" | "perplexity";
 
 type PromptRun = {
-  period: string;              // "YYYY-MM"
-  capturedAt: string | null;   // ISO
+  period: string; // "YYYY-MM"
+  capturedAt: string | null; // ISO
   status: "ok" | "error";
-  mentioned: boolean | null;   // null when status = "error"
-  position: number | null;     // 1-based; null when not mentioned
+  mentioned: boolean | null; // null when status = "error"
+  position: number | null; // 1-based; null when not mentioned
   brandsNamed: number | null;
-  citedUrl: string | null;     // this site's first cited page
-  competitors: { domain: string; name: string | null; position: number | null }[];
+  citedUrl: string | null; // this site's first cited page
+  competitors: {
+    domain: string;
+    name: string | null;
+    position: number | null;
+  }[];
   excerpt: string | null;
   error: string | null;
 };
@@ -163,15 +167,15 @@ type PromptPlatformResult = {
 };
 
 type AiVisibilityPrompts = {
-  lastRunAt: string | null;    // newest captured_at across active prompts
-  nextRunAt: string | null;    // earliest next_run_at across active prompts
+  lastRunAt: string | null; // newest captured_at across active prompts
+  nextRunAt: string | null; // earliest next_run_at across active prompts
   items: {
     id: string;
     prompt: string;
-    platforms: PromptPlatform[];       // configured
+    platforms: PromptPlatform[]; // configured
     createdAt: string | null;
-    results: PromptPlatformResult[];   // only platforms with at least one run; order chat_gpt, google_ai_mode, perplexity
-  }[];                                 // active prompts, oldest first; [] when none
+    results: PromptPlatformResult[]; // only platforms with at least one run; order chat_gpt, google_ai_mode, perplexity
+  }[]; // active prompts, oldest first; [] when none
 };
 // summary.aiVisibility.prompts: AiVisibilityPrompts | { error: string }
 ```
@@ -216,13 +220,13 @@ Example (SBLV, after the first run):
 
 ## MCP tools
 
-| Tool | Spends | Input | Output |
-|---|---|---|---|
-| `add_ai_visibility_prompts` | Schedules about $0.014 per new prompt, which the cron spends within about 10 minutes | `projectId`, `prompts: string[1..10]`, `platforms?: PromptPlatform[]` (default all 3) | `{ added, reactivated, unchanged, prompts[] }` |
-| `list_ai_visibility_prompts` | No | `projectId`, `includeInactive?` | `{ prompts[] }` with schedule fields |
-| `remove_ai_visibility_prompts` | No | `projectId`, `promptIds: string[1..20]` | `{ removed }` (deactivated, history kept) |
-| `run_ai_visibility_prompts` | Yes, ~$0.014 per prompt | `projectId`, `promptIds?` (default all active), `force?` | `{ period, costUsd, ran[], skipped[], failed[] }` |
-| `get_ai_visibility_prompt_results` | No | `projectId` | The `AiVisibilityPrompts` object above, plus a text table |
+| Tool                               | Spends                                                                               | Input                                                                                 | Output                                                    |
+| ---------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| `add_ai_visibility_prompts`        | Schedules about $0.014 per new prompt, which the cron spends within about 10 minutes | `projectId`, `prompts: string[1..10]`, `platforms?: PromptPlatform[]` (default all 3) | `{ added, reactivated, unchanged, prompts[] }`            |
+| `list_ai_visibility_prompts`       | No                                                                                   | `projectId`, `includeInactive?`                                                       | `{ prompts[] }` with schedule fields                      |
+| `remove_ai_visibility_prompts`     | No                                                                                   | `projectId`, `promptIds: string[1..20]`                                               | `{ removed }` (deactivated, history kept)                 |
+| `run_ai_visibility_prompts`        | Yes, ~$0.014 per prompt                                                              | `projectId`, `promptIds?` (default all active), `force?`                              | `{ period, costUsd, ran[], skipped[], failed[] }`         |
+| `get_ai_visibility_prompt_results` | No                                                                                   | `projectId`                                                                           | The `AiVisibilityPrompts` object above, plus a text table |
 
 `run` skips platforms that already have an `ok` row this period unless `force` is set. It refuses when the project has no AI visibility tracker. It runs at most 10 prompts per call.
 

@@ -1,8 +1,6 @@
 import { z } from "zod";
-import {
-  AiVisibilityPromptService,
-  type PromptPlatformResultView,
-} from "@/server/features/ai-visibility/services/AiVisibilityPromptService";
+import { AiVisibilityPromptService } from "@/server/features/ai-visibility/services/AiVisibilityPromptService";
+import type { PromptPlatformResultView } from "@/server/features/ai-visibility/services/aiVisibilityPromptResults";
 import { buildProjectMeta } from "@/server/mcp/context";
 import { mcpResponse } from "@/server/mcp/formatters";
 import {
