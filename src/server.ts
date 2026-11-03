@@ -10,6 +10,7 @@ import { runScheduledRankChecks } from "@/server/features/rank-tracking/services
 import { runScheduledAiVisibilityChecks } from "@/server/features/ai-visibility/services/scheduledAiVisibilityChecks";
 import { runScheduledIndexInspections } from "@/server/features/gsc/services/scheduledIndexInspections";
 import { runScheduledLocalGridChecks } from "@/server/features/local-grid/services/scheduledLocalGridChecks";
+import { runScheduledGbpSnapshots } from "@/server/features/gbp-watch/services/scheduledGbpSnapshots";
 import { reconcileStaleAudits } from "@/server/features/audit/services/auditReconciler";
 import { getOrCreateOrganizationCustomer } from "@/server/billing/subscription";
 import { isHostedServerAuthMode } from "@/server/lib/runtime-env";
@@ -261,6 +262,13 @@ export default {
       await withPgClient(() => runScheduledLocalGridChecks());
     } catch (err) {
       console.error("[cron] Local grid checks failed:", err);
+    }
+    // CLIENT-SBLV-193: weekly GBP watch snapshots (Mondays 14:00 UTC, one
+    // due watch per tick). Last, and isolated, like the AI-visibility loop.
+    try {
+      await withPgClient(() => runScheduledGbpSnapshots());
+    } catch (err) {
+      console.error("[cron] GBP snapshots failed:", err);
     }
     if (watchdogError) throw watchdogError;
   },

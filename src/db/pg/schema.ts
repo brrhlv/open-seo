@@ -2,6 +2,7 @@ export * from "./app.schema";
 export * from "./project-context.schema";
 export * from "./ai-visibility.schema";
 export * from "./local-grid.schema";
+export * from "./gbp-watch.schema";
 export * from "./audit.schema";
 export * from "./sam.schema";
 export * from "./better-auth-schema";

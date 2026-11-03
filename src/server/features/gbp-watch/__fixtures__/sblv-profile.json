@@ -1,0 +1,117 @@
+{
+  "title": "Social Booth LV",
+  "category": "Photo booth",
+  "additional_categories": [
+    "Balloon artist",
+    "Event management company",
+    "Event planner",
+    "Party equipment rental service"
+  ],
+  "cid": "5590594803775798319",
+  "place_id": "ChIJuy0JGkfryIARL3wzklrIlU0",
+  "address": "8400 Surfs Up Dr, Las Vegas, NV 89128",
+  "phone": "+1702-291-8712",
+  "url": "https://socialboothlv.com/",
+  "latitude": 36.2108236,
+  "longitude": -115.2695665,
+  "total_photos": 115,
+  "is_claimed": true,
+  "rating": {
+    "rating_type": "Max5",
+    "value": 5,
+    "votes_count": 113,
+    "rating_max": null
+  },
+  "work_time": {
+    "work_hours": {
+      "timetable": {
+        "sunday": [
+          {
+            "open": {
+              "hour": 9,
+              "minute": 0
+            },
+            "close": {
+              "hour": 21,
+              "minute": 0
+            }
+          }
+        ],
+        "monday": [
+          {
+            "open": {
+              "hour": 9,
+              "minute": 0
+            },
+            "close": {
+              "hour": 21,
+              "minute": 0
+            }
+          }
+        ],
+        "tuesday": [
+          {
+            "open": {
+              "hour": 9,
+              "minute": 0
+            },
+            "close": {
+              "hour": 21,
+              "minute": 0
+            }
+          }
+        ],
+        "wednesday": [
+          {
+            "open": {
+              "hour": 9,
+              "minute": 0
+            },
+            "close": {
+              "hour": 21,
+              "minute": 0
+            }
+          }
+        ],
+        "thursday": [
+          {
+            "open": {
+              "hour": 9,
+              "minute": 0
+            },
+            "close": {
+              "hour": 21,
+              "minute": 0
+            }
+          }
+        ],
+        "friday": [
+          {
+            "open": {
+              "hour": 9,
+              "minute": 0
+            },
+            "close": {
+              "hour": 21,
+              "minute": 0
+            }
+          }
+        ],
+        "saturday": [
+          {
+            "open": {
+              "hour": 9,
+              "minute": 0
+            },
+            "close": {
+              "hour": 21,
+              "minute": 0
+            }
+          }
+        ]
+      },
+      "current_status": "close"
+    }
+  },
+  "description": "Corporate photo booth rental for Las Vegas trade shows, conventions and brand activations."
+}

@@ -3,6 +3,7 @@ import * as sqliteApp from "./app.schema";
 import * as sqliteProjectContext from "./project-context.schema";
 import * as sqliteAiVisibility from "./ai-visibility.schema";
 import * as sqliteLocalGrid from "./local-grid.schema";
+import * as sqliteGbpWatch from "./gbp-watch.schema";
 import * as sqliteAudit from "./audit.schema";
 import * as sqliteSam from "./sam.schema";
 import * as sqliteAuth from "./better-auth-schema";
@@ -15,6 +16,7 @@ import * as pgApp from "./pg/app.schema";
 import * as pgProjectContext from "./pg/project-context.schema";
 import * as pgAiVisibility from "./pg/ai-visibility.schema";
 import * as pgLocalGrid from "./pg/local-grid.schema";
+import * as pgGbpWatch from "./pg/gbp-watch.schema";
 import * as pgAudit from "./pg/audit.schema";
 import * as pgSam from "./pg/sam.schema";
 import * as pgAuth from "./pg/better-auth-schema";
@@ -38,6 +40,7 @@ type AppSchema = typeof sqliteApp &
   typeof sqliteProjectContext &
   typeof sqliteAiVisibility &
   typeof sqliteLocalGrid &
+  typeof sqliteGbpWatch &
   typeof sqliteAudit &
   typeof sqliteSam &
   typeof sqliteAuth &
@@ -54,6 +57,7 @@ const runtimeSchema =
         ...pgProjectContext,
         ...pgAiVisibility,
         ...pgLocalGrid,
+        ...pgGbpWatch,
         ...pgAudit,
         ...pgSam,
         ...pgAuth,
@@ -68,6 +72,7 @@ const runtimeSchema =
         ...sqliteProjectContext,
         ...sqliteAiVisibility,
         ...sqliteLocalGrid,
+        ...sqliteGbpWatch,
         ...sqliteAudit,
         ...sqliteSam,
         ...sqliteAuth,
@@ -101,6 +106,8 @@ export const {
   localGridKeywords,
   localGridSnapshots,
   localGridCells,
+  gbpConfigs,
+  gbpSnapshots,
   projectContextSections,
   projectCompetitors,
   projectKeyPages,

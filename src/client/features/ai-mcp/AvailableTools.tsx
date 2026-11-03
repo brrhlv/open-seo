@@ -179,6 +179,22 @@ const toolCategories: ToolCategory[] = [
         description: "Check posting activity on a Google Business Profile.",
       },
       {
+        name: "get_gbp_watch",
+        title: "Get GBP watch",
+        description:
+          "Read the weekly profile snapshots, changes and drift from the accepted state.",
+      },
+      {
+        name: "run_gbp_snapshot",
+        title: "Run GBP snapshot",
+        description: "Snapshot the Google Business Profile now.",
+      },
+      {
+        name: "set_gbp_watch",
+        title: "Set GBP watch",
+        description: "Watch a profile weekly against its accepted state.",
+      },
+      {
         name: "list_business_categories",
         title: "List business categories",
         description: "Find valid Google Business category slugs.",

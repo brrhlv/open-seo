@@ -29,6 +29,11 @@ import {
   getLocalGridTool,
   runLocalGridTool,
 } from "@/server/mcp/tools/local-grid-tools";
+import {
+  getGbpWatchTool,
+  runGbpSnapshotTool,
+  setGbpWatchTool,
+} from "@/server/mcp/tools/gbp-watch-tools";
 import { getSerpResultsTool } from "@/server/mcp/tools/get-serp-results";
 import {
   getGoogleAnalyticsAudienceBreakdownTool,
@@ -195,6 +200,9 @@ export function createOpenSeoMcpServer(authProps: McpProps) {
   register(getBusinessProfileTool);
   register(getBusinessReviewsTool);
   register(getBusinessUpdatesTool);
+  register(getGbpWatchTool);
+  register(runGbpSnapshotTool);
+  register(setGbpWatchTool);
   register(listBusinessCategoriesTool);
   register(getLocalRankGridTool);
   register(getLocalGridTool);

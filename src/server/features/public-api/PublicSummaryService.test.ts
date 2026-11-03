@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   getAuditPagesSection: vi.fn(),
   getIndexStatusSection: vi.fn(),
   getGa4KeyEventsSection: vi.fn(),
+  getGbpSection: vi.fn(),
 }));
 
 vi.mock("@/server/features/projects/services/ProjectService", () => ({
@@ -85,6 +86,8 @@ vi.mock(
     },
   }),
 );
+// CLIENT-SBLV-193: the section is covered in GbpWatchService.test.ts.
+vi.mock("./sections/gbp", () => ({ getGbpSection: mocks.getGbpSection }));
 vi.mock("@/server/features/ai-search/services/brandLookup", () => ({
   getBrandLookup: vi.fn(),
 }));
@@ -172,6 +175,7 @@ describe("PublicSummaryService.getSummary", () => {
     mocks.getGa4KeyEventsSection.mockRejectedValue(
       new Ga4ReportError("ga4_not_connected", "not connected"),
     );
+    mocks.getGbpSection.mockResolvedValue({ tracked: false, profile: null });
   });
 
   it("returns null for an unknown or archived project", async () => {
@@ -225,7 +229,9 @@ describe("PublicSummaryService.getSummary", () => {
       auditPages: { status: "none" },
       indexStatus: { connected: false },
       localGrid: UNTRACKED_GRID,
+      gbp: { tracked: false, profile: null },
     });
+    expect(mocks.getGbpSection).toHaveBeenCalledWith("proj-a", NOW);
   });
 
   it("isolates a failing localGrid read like any other section", async () => {
@@ -274,6 +280,7 @@ describe("PublicSummaryService.getSummary", () => {
       "auditPages",
       "indexStatus",
       "localGrid",
+      "gbp",
     ]);
     expect(Object.keys(summary?.ga4 ?? {})).toEqual([
       "connected",
@@ -302,6 +309,14 @@ describe("PublicSummaryService.getSummary", () => {
       indexStatus: { error: "internal_error" },
       ga4: { connected: false },
     });
+  });
+
+  it("fails the gbp section alone", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.getGbpSection.mockRejectedValue(new Error("d1 down"));
+    const summary = await PublicSummaryService.getSummary(input);
+    expect(summary?.gbp).toEqual({ error: "internal_error" });
+    expect(summary?.audit).toMatchObject({ status: "none" });
   });
 
   it("turns a failing section into an error code without failing the others", async () => {

@@ -35,6 +35,7 @@ import { getGa4KeyEventsSection } from "./sections/ga4KeyEvents";
 import { getIndexStatusSection } from "./sections/indexStatus";
 import { getOpportunitiesSection } from "./sections/opportunities";
 import { sectionErrorCode } from "./sections/sectionErrorCode";
+import { getGbpSection } from "./sections/gbp";
 
 // Read-only project summary for external dashboards (PAI-222). Every read is
 // D1 or first-party Google data — never a DataForSEO-metered path (no
@@ -400,16 +401,25 @@ async function getSummary(input: {
     getAuditPagesSection(project.id, now),
     getIndexStatusSection(project.id),
   ]);
-  const [rankings, backlinks, audit, gsc, ga4, aiVisibility, savedKeywords] =
-    await Promise.allSettled([
-      getRankings(project.id, input.range),
-      getBacklinks(project.id, project.domain),
-      getAudit(project.id),
-      getGsc(project.id, dates),
-      getGa4(project.id, dates, now),
-      getAiVisibility(project.id),
-      getSavedKeywordsSection(project.id),
-    ]);
+  const [
+    rankings,
+    backlinks,
+    audit,
+    gsc,
+    ga4,
+    aiVisibility,
+    savedKeywords,
+    gbp,
+  ] = await Promise.allSettled([
+    getRankings(project.id, input.range),
+    getBacklinks(project.id, project.domain),
+    getAudit(project.id),
+    getGsc(project.id, dates),
+    getGa4(project.id, dates, now),
+    getAiVisibility(project.id),
+    getSavedKeywordsSection(project.id),
+    getGbpSection(project.id, now),
+  ]);
   const [opportunities, auditPages, indexStatus] = await v2Sections;
 
   return {
@@ -427,6 +437,7 @@ async function getSummary(input: {
     auditPages: unwrap("auditPages", project.id, auditPages),
     indexStatus: unwrap("indexStatus", project.id, indexStatus),
     localGrid: unwrap("localGrid", project.id, (await localGridPending)[0]),
+    gbp: unwrap("gbp", project.id, gbp),
   };
 }
 
