@@ -27,6 +27,7 @@ import {
   resolvePublicSummaryDates,
   type PublicSummaryRange,
 } from "./publicSummaryRange";
+import { getSavedKeywordsSection } from "./sections/savedKeywords";
 import { toIsoTimestamp } from "./timestamps";
 
 // Read-only project summary for external dashboards (PAI-222). Every read is
@@ -381,7 +382,7 @@ async function getSummary(input: {
   const now = input.now ?? new Date();
   const dates = resolvePublicSummaryDates(input.range, now);
 
-  const [rankings, backlinks, audit, gsc, ga4, aiVisibility] =
+  const [rankings, backlinks, audit, gsc, ga4, aiVisibility, savedKeywords] =
     await Promise.allSettled([
       getRankings(project.id, input.range),
       getBacklinks(project.id, project.domain),
@@ -389,6 +390,7 @@ async function getSummary(input: {
       getGsc(project.id, dates),
       getGa4(project.id, dates),
       getAiVisibility(project.id),
+      getSavedKeywordsSection(project.id),
     ]);
 
   return {
@@ -401,6 +403,7 @@ async function getSummary(input: {
     gsc: unwrap("gsc", project.id, gsc),
     ga4: unwrap("ga4", project.id, ga4),
     aiVisibility: unwrap("aiVisibility", project.id, aiVisibility),
+    savedKeywords: unwrap("savedKeywords", project.id, savedKeywords),
   };
 }
 

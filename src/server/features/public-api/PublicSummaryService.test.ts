@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   runReport: vi.fn(),
   getAiVisibilityConfig: vi.fn(),
   listRecentAiVisibilitySnapshots: vi.fn(),
+  listSavedKeywordsByProject: vi.fn(),
 }));
 
 vi.mock("@/server/features/projects/services/ProjectService", () => ({
@@ -84,6 +85,14 @@ vi.mock("@/server/features/ai-search/services/brandLookup", () => ({
   getBrandLookup: vi.fn(),
 }));
 vi.mock(
+  "@/server/features/keywords/repositories/KeywordResearchRepository",
+  () => ({
+    KeywordResearchRepository: {
+      listSavedKeywordsByProject: mocks.listSavedKeywordsByProject,
+    },
+  }),
+);
+vi.mock(
   "@/server/features/project-context/repositories/ProjectContextRepository",
   () => ({ ProjectContextRepository: {} }),
 );
@@ -125,6 +134,11 @@ describe("PublicSummaryService.getSummary", () => {
     );
     mocks.getAiVisibilityConfig.mockResolvedValue(null);
     mocks.listRecentAiVisibilitySnapshots.mockResolvedValue([]);
+    mocks.listSavedKeywordsByProject.mockResolvedValue({
+      rows: [],
+      totalCount: 0,
+      tags: [],
+    });
   });
 
   it("returns null for an unknown or archived project", async () => {
@@ -168,6 +182,25 @@ describe("PublicSummaryService.getSummary", () => {
         platforms: [],
         history: [],
       },
+      savedKeywords: {
+        totalCount: 0,
+        truncated: false,
+        tags: [],
+        keywords: [],
+      },
+    });
+  });
+
+  it("isolates a failing savedKeywords section (CLIENT-SBLV-196)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.listSavedKeywordsByProject.mockRejectedValue(new Error("d1 down"));
+
+    expect(await PublicSummaryService.getSummary(input)).toMatchObject({
+      savedKeywords: { error: "internal_error" },
+      audit: { status: "none" },
+      backlinks: { backlinks: 0 },
+      gsc: { connected: false },
+      aiVisibility: { tracked: false },
     });
   });
 
