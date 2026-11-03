@@ -2,8 +2,9 @@ import { z } from "zod";
 import {
   estimateGridCostUsd,
   LocalGridService,
+  keywordsPerRun,
+  MAX_ATTEMPTS_PER_MONTH,
   MAX_GRID_KEYWORDS,
-  MAX_KEYWORDS_PER_RUN,
 } from "@/server/features/local-grid/services/LocalGridService";
 import {
   getLocalGridSummary,
@@ -57,9 +58,11 @@ const createInputSchema = {
     })
     .describe("Grid center, usually the Google Business Profile pin."),
   gridSize: z
-    .union([z.literal(3), z.literal(5)])
+    .literal(3)
     .optional()
-    .describe("3 (9 searches per keyword, default) or 5 (25)."),
+    .describe(
+      "3 (9 searches per keyword). 5x5 (25 per keyword) is refused until the Worker is on a paid plan: a cron tick on Workers Free cannot make that many calls.",
+    ),
   spacingKm: z
     .number()
     .min(0.25)
@@ -82,7 +85,7 @@ export const createLocalGridTrackerTool = {
   name: "create_local_grid_tracker",
   config: {
     title: "Create local grid tracker",
-    description: `Create (or update) the project's stored Maps rank grid: keywords, business (placeId/cid), center, grid size and spacing. One tracker per project; calling again replaces it and its keyword list (stored history stays). Uses no credits and starts no run. A monthly tracker spends credits on the 2nd of each month: a 3x3 grid is 9 SERP calls per keyword (about $${PER_KEYWORD_3X3.toFixed(3)}); 5x5 is 25. Call get_local_grid first to see an existing tracker.`,
+    description: `Create (or update) the project's stored Maps rank grid: keywords, business (placeId/cid), center, grid size and spacing. One tracker per project; calling again replaces it and its keyword list (stored history stays) and resets the next scheduled run to the next 2nd of the month. Keywords are stored lowercased. Uses no credits and starts no run. A monthly tracker spends credits on the 2nd of each month: a 3x3 grid is 9 SERP calls per keyword (about $${PER_KEYWORD_3X3.toFixed(3)}). Call get_local_grid first to see an existing tracker.`,
     inputSchema: createInputSchema,
     outputSchema: z
       .object({
@@ -153,14 +156,17 @@ export const runLocalGridTool = {
   name: "run_local_grid",
   config: {
     title: "Run local grid now",
-    description: `Grid the tracker's keywords now and store the result for this month. This spends credits: a 3x3 grid is 9 SERP calls per keyword (about $${PER_KEYWORD_3X3.toFixed(3)}); 5x5 is 25 calls. At most ${MAX_KEYWORDS_PER_RUN} keywords per call; the rest come back as remaining. Free for keywords already gridded this month (unless force is set). Show the user the estimate before calling. Requires a tracker from create_local_grid_tracker; read results with get_local_grid.`,
+    description: `Grid the tracker's keywords now and store the result for this month. This spends credits: a 3x3 grid is 9 SERP calls per keyword (about $${PER_KEYWORD_3X3.toFixed(3)}). At most ${keywordsPerRun(3)} keywords per call on 3x3 (27 calls); the rest come back as remaining. Free for keywords already gridded this month (unless force is set). A keyword whose grid fails, or comes back with over a third of its points failed, is retried later, up to ${MAX_ATTEMPTS_PER_MONTH} times a month. Refused while another run (the monthly cron or another call) holds the tracker. Show the user the estimate before calling. Requires a tracker from create_local_grid_tracker; read results with get_local_grid.`,
     inputSchema: runInputSchema,
     outputSchema: z
       .object({
         period: z.string(),
         checked: z.array(looseObjectOutputSchema),
+        failed: z.array(looseObjectOutputSchema),
         alreadyCaptured: z.array(z.string()),
         remaining: z.array(z.string()),
+        retry: z.array(z.string()),
+        gaveUp: z.array(z.string()),
         costUsd: z.number(),
         ...optionalMetaOutputSchema,
       })
@@ -180,8 +186,11 @@ export const runLocalGridTool = {
     });
     const lines = result.checked.map(
       (run) =>
-        `- ${run.keyword}: found at ${run.pointsFound}/${run.pointsSearched} points, SoLV ${run.solvPct ?? "—"}%, ARP ${run.arp ?? "—"}, ATRP ${run.atrp ?? "—"} ($${run.costUsd.toFixed(4)})`,
+        `- ${run.keyword}: found at ${run.pointsFound}/${run.pointsSearched} points, SoLV ${run.solvPct ?? "—"}%, ARP ${run.arp ?? "—"}, ATRP ${run.atrp ?? "—"} ($${run.costUsd.toFixed(4)})${run.degraded ? ` — ${run.pointsFailed} points failed, will retry` : ""}`,
     );
+    for (const f of result.failed) {
+      lines.push(`- ${f.keyword}: failed (${f.error}), will retry`);
+    }
     if (result.alreadyCaptured.length > 0) {
       lines.push(
         `Already gridded for ${result.period} (no credits used): ${result.alreadyCaptured.join(", ")}. Pass force: true to re-run.`,
@@ -189,7 +198,12 @@ export const runLocalGridTool = {
     }
     if (result.remaining.length > 0) {
       lines.push(
-        `Not run yet (over ${MAX_KEYWORDS_PER_RUN} per call): ${result.remaining.join(", ")}. Call again to continue.`,
+        `Not run yet: ${result.remaining.join(", ")}. Call again to continue.`,
+      );
+    }
+    if (result.gaveUp.length > 0) {
+      lines.push(
+        `Failed ${MAX_ATTEMPTS_PER_MONTH} times this month, left until next month (force: true to try anyway): ${result.gaveUp.join(", ")}.`,
       );
     }
     return mcpResponse({
@@ -257,7 +271,7 @@ export const getLocalGridTool = {
   handler: withMcpProjectAuth(async (args: GetArgs, context) => {
     const summary = await getLocalGridSummary(args.projectId);
     const header = summary.center
-      ? `Local grid tracker${summary.tracked ? "" : " (paused)"} for ${summary.target?.name ?? summary.target?.placeId ?? summary.target?.cid}, ${summary.gridSize}x${summary.gridSize} around ${summary.center.latitude},${summary.center.longitude}, ${summary.spacingKm} km spacing, ${summary.scheduleInterval}. Last run: ${summary.lastCheckedAt ?? "never"}. Next: ${summary.nextCheckAt ?? "none"}.`
+      ? `Local grid tracker${summary.paused ? " (paused)" : ""} for ${summary.target?.name ?? summary.target?.placeId ?? summary.target?.cid}, ${summary.gridSize}x${summary.gridSize} around ${summary.center.latitude},${summary.center.longitude}, ${summary.spacingKm} km spacing, ${summary.scheduleInterval}. Last run: ${summary.lastCheckedAt ?? "never"}. Next: ${summary.nextCheckAt ?? "none"}.`
       : "No local grid tracker for this project.";
     const body =
       summary.keywords.length === 0

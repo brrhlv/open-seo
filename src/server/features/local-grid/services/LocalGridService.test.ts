@@ -116,6 +116,20 @@ describe("createTracker", () => {
     ]);
     expect(config.nextCheckAt).toBe("2026-11-02T07:00:00.000Z");
   });
+
+  it("lowercases keywords and refuses a 5x5 grid on Workers Free", async () => {
+    const { keywords } = await track(["Photo Booth LAS VEGAS"]);
+    expect(keywords).toEqual(["photo booth las vegas"]);
+    await expect(
+      Service.LocalGridService.createTracker({
+        projectId: PROJECT,
+        keywords: ["a"],
+        target: TARGET,
+        center: CENTER,
+        gridSize: 5,
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+  });
 });
 
 describe("runCheck", () => {
@@ -180,6 +194,48 @@ describe("runCheck", () => {
     });
     expect(result.checked.map((r) => r.keyword)).toEqual(["a"]);
     expect(result.remaining).toEqual(["b", "c"]);
+  });
+});
+
+describe("runCheck limits", () => {
+  const now = new Date("2026-11-02T07:00:00Z");
+  const run = { projectId: PROJECT, billingCustomer: BILLING, now };
+
+  it("caps a run by calls: three 3x3 keywords, one 5x5 keyword", async () => {
+    await track(["a", "b", "c", "d"]);
+    expect((await Service.LocalGridService.runCheck(run)).checked).toHaveLength(
+      3,
+    );
+    // A 5x5 row stored before the cap (or edited in D1): 25 calls, one keyword.
+    await client.execute("UPDATE local_grid_configs SET grid_size = 5");
+    mocks.local.mockClear();
+    const five = await Service.LocalGridService.runCheck({
+      ...run,
+      force: true,
+    });
+    expect(five.checked).toHaveLength(1);
+    expect(mocks.local).toHaveBeenCalledTimes(25);
+    expect(Service.keywordsPerRun(3)).toBe(3);
+  });
+
+  it("matches keywords whatever their case", async () => {
+    await track(["Brand Activation"]);
+    const result = await Service.LocalGridService.runCheck({
+      ...run,
+      keywords: ["BRAND activation"],
+    });
+    expect(result.checked.map((r) => r.keyword)).toEqual(["brand activation"]);
+  });
+
+  it("refuses to run while another run holds the tracker", async () => {
+    await track(["a"]);
+    await client.execute(
+      "UPDATE local_grid_configs SET lease_until = '2026-11-02T07:05:00.000Z'",
+    );
+    await expect(Service.LocalGridService.runCheck(run)).rejects.toMatchObject({
+      code: "RATE_LIMITED",
+    });
+    expect(mocks.local).not.toHaveBeenCalled();
   });
 });
 

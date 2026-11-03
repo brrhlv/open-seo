@@ -8,38 +8,45 @@ import {
   it,
   vi,
 } from "vitest";
+import { AppError } from "@/server/lib/errors";
 import { createLocalGridTestDb } from "../local-grid-test-support";
-import type * as LocalGridServiceModule from "./LocalGridService";
 import type * as SchedulerModule from "./scheduledLocalGridChecks";
 
-// Real due query + compare-and-set over in-memory SQLite; only the paid run
-// itself (runCheck) is mocked.
+// Real scheduler, service and repository over in-memory SQLite, tick by tick;
+// only DataForSEO is mocked, per keyword.
 
 vi.mock("cloudflare:workers", () => ({
   env: { DATABASE_PROVIDER: "d1" },
   waitUntil: vi.fn(),
 }));
 
+type Behaviour = "ok" | "throw" | "degraded" | "no-credits";
 const mocks = vi.hoisted(() => ({
-  runCheck:
-    vi.fn<(input: { projectId: string; limit?: number }) => Promise<unknown>>(),
+  behaviour: new Map<string, Behaviour>(),
+  calls: [] as string[],
+  points: new Map<string, number>(),
 }));
 
-vi.mock(
-  "@/server/features/local-grid/services/LocalGridService",
-  async (importOriginal) => {
-    const actual = await importOriginal<typeof LocalGridServiceModule>();
-    return {
-      ...actual,
-      LocalGridService: {
-        ...actual.LocalGridService,
-        runCheck: mocks.runCheck,
+vi.mock("@/server/lib/dataforseo", () => ({
+  createDataforseoClient: () => ({
+    serp: {
+      local: async ({ keyword }: { keyword: string }) => {
+        mocks.calls.push(keyword);
+        const n = (mocks.points.get(keyword) ?? 0) + 1;
+        mocks.points.set(keyword, n);
+        const behaviour = mocks.behaviour.get(keyword) ?? "ok";
+        if (behaviour === "no-credits")
+          throw new AppError("INSUFFICIENT_CREDITS", "No credits");
+        if (behaviour === "throw") throw new Error(`${keyword} upstream down`);
+        // Degraded: points 1-3 and 9 of each grid fail (4 of 9, over a third).
+        if (behaviour === "degraded" && n % 9 < 4) {
+          throw new Error("point failed");
+        }
+        return [{ rank_absolute: 1, cid: "559" }];
       },
-    };
-  },
-);
-
-const NOW = new Date("2026-12-02T07:02:00Z");
+    },
+  }),
+}));
 
 let client: Client;
 let Scheduler: typeof SchedulerModule;
@@ -48,79 +55,135 @@ beforeAll(async () => {
   const testDb = await createLocalGridTestDb();
   client = testDb.client;
   vi.doMock("@/db", () => ({ db: testDb.db }));
+  vi.doMock("@/db/runBatch", () => ({
+    runBatch: async (build: (tx: unknown) => Promise<unknown>[]) => {
+      for (const statement of build(testDb.db)) await statement;
+    },
+  }));
   // Dynamic import after doMock so the repository binds to the test DB.
   Scheduler = await import("./scheduledLocalGridChecks");
 }, 60_000);
 
 afterAll(() => client.close());
 
-function tracker(id: string, nextCheckAt: string, schedule = "monthly") {
+const START = "2026-12-02T07:00:00.000Z";
+
+function tracker(
+  id: string,
+  keywords: string[],
+  options: { next?: string; schedule?: string; leaseUntil?: string } = {},
+) {
+  const lease = options.leaseUntil ? `'${options.leaseUntil}'` : "NULL";
+  const rows = keywords.map(
+    (k, i) =>
+      `INSERT INTO local_grid_keywords (id, config_id, keyword, created_at) VALUES ('${id}-${k}', '${id}', '${k}', '2026-11-01T00:00:0${i}Z');`,
+  );
   return `
     INSERT INTO projects (id, organization_id, name) VALUES ('p-${id}', 'org-1', '${id}');
-    INSERT INTO local_grid_configs (id, project_id, target_place_id, center_latitude, center_longitude, schedule_interval, next_check_at)
-      VALUES ('${id}', 'p-${id}', 'place', 36.2, -115.2, '${schedule}', '${nextCheckAt}');
+    INSERT INTO local_grid_configs (id, project_id, target_cid, center_latitude, center_longitude, schedule_interval, next_check_at, lease_until)
+      VALUES ('${id}', 'p-${id}', '559', 36.2, -115.2, '${options.schedule ?? "monthly"}', '${options.next ?? START}', ${lease});
+    ${rows.join("\n")}
   `;
 }
 
 async function config(id: string) {
   const result = await client.execute({
-    sql: "SELECT next_check_at, last_error FROM local_grid_configs WHERE id = ?",
+    sql: "SELECT next_check_at, last_error, lease_until FROM local_grid_configs WHERE id = ?",
     args: [id],
   });
   return result.rows[0];
 }
 
-const ran = (remaining: string[]) => ({
-  period: "2026-12",
-  checked: [{ keyword: "a" }],
-  alreadyCaptured: [],
-  remaining,
-  costUsd: 0.018,
-});
+/** Run a tick at `iso` and return the keywords it gridded. */
+async function tick(iso: string) {
+  const before = mocks.calls.length;
+  await Scheduler.runScheduledLocalGridChecks(new Date(iso));
+  return [...new Set(mocks.calls.slice(before))];
+}
 
 beforeEach(async () => {
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});
-  mocks.runCheck.mockResolvedValue(ran([]));
+  mocks.behaviour.clear();
+  mocks.points.clear();
+  mocks.calls.length = 0;
   await client.executeMultiple(`
-    DELETE FROM local_grid_configs;
+    DELETE FROM local_grid_cells; DELETE FROM local_grid_snapshots;
+    DELETE FROM local_grid_keywords; DELETE FROM local_grid_configs;
     DELETE FROM projects;
   `);
 });
 
 describe("runScheduledLocalGridChecks", () => {
-  it("grids one keyword of the oldest due monthly tracker per tick", async () => {
+  it("grids one keyword of the oldest due tracker per tick, then waits for the next 2nd", async () => {
     await client.executeMultiple(
-      tracker("older", "2026-12-02T07:00:00.000Z") +
-        tracker("newer", "2026-12-02T07:01:00.000Z") +
-        tracker("future", "2027-01-02T07:00:00.000Z") +
-        tracker("manual", "2026-12-01T00:00:00.000Z", "manual"),
+      tracker("older", ["a", "b"]) +
+        tracker("newer", ["x"], { next: "2026-12-02T07:06:00.000Z" }) +
+        tracker("future", ["y"], { next: "2027-01-02T07:00:00.000Z" }) +
+        tracker("manual", ["z"], { schedule: "manual" }) +
+        tracker("leased", ["w"], {
+          next: "2026-12-01T00:00:00.000Z",
+          leaseUntil: "2026-12-02T07:12:00.000Z",
+        }),
     );
-    await Scheduler.runScheduledLocalGridChecks(NOW);
-
-    expect(mocks.runCheck).toHaveBeenCalledTimes(1);
-    expect(mocks.runCheck).toHaveBeenCalledWith(
-      expect.objectContaining({ projectId: "p-older", limit: 1 }),
-    );
+    expect(await tick("2026-12-02T07:05:00.000Z")).toEqual(["a"]);
+    expect(await config("older")).toMatchObject({
+      next_check_at: "2026-12-02T07:05:00.000Z",
+      lease_until: null,
+    });
+    expect(await tick("2026-12-02T07:10:00.000Z")).toEqual(["b"]);
     expect((await config("older"))?.next_check_at).toBe(
       "2027-01-02T07:00:00.000Z",
     );
+    // Once its lease expires the leased tracker (due earliest) runs first.
+    expect(await tick("2026-12-02T07:15:00.000Z")).toEqual(["w"]);
+    expect(await tick("2026-12-02T07:20:00.000Z")).toEqual(["x"]);
   });
 
-  it("keeps a tracker due while keywords remain this month", async () => {
-    await client.executeMultiple(tracker("t", "2026-12-02T07:00:00.000Z"));
-    mocks.runCheck.mockResolvedValue(ran(["b", "c"]));
-    await Scheduler.runScheduledLocalGridChecks(NOW);
-    expect((await config("t"))?.next_check_at).toBe(NOW.toISOString());
+  it("a grid with over a third of its points failed is stored but retried", async () => {
+    await client.executeMultiple(tracker("t", ["a"]));
+    mocks.behaviour.set("a", "degraded");
+    expect(await tick("2026-12-02T07:05:00.000Z")).toEqual(["a"]);
+    const stored = await client.execute(
+      "SELECT points_failed FROM local_grid_snapshots",
+    );
+    expect(stored.rows[0]?.points_failed).toBe(4);
+    expect((await config("t"))?.next_check_at).toBe("2026-12-02T13:05:00.000Z");
+
+    mocks.behaviour.set("a", "ok");
+    expect(await tick("2026-12-02T13:05:00.000Z")).toEqual(["a"]);
+    expect((await config("t"))?.next_check_at).toBe("2027-01-02T07:00:00.000Z");
   });
 
-  it("records a failure and retries in six hours", async () => {
-    await client.executeMultiple(tracker("t", "2026-12-02T07:00:00.000Z"));
-    mocks.runCheck.mockRejectedValue(new Error("DataForSEO down"));
-    await Scheduler.runScheduledLocalGridChecks(NOW);
+  it("a keyword that keeps failing goes behind the others and stops after three tries", async () => {
+    await client.executeMultiple(tracker("t", ["a", "b", "c"]));
+    mocks.behaviour.set("a", "throw");
+
+    const ran = [
+      await tick("2026-12-02T07:05:00.000Z"), // a fails (1)
+      await tick("2026-12-02T07:10:00.000Z"),
+      await tick("2026-12-02T07:15:00.000Z"),
+    ];
+    expect(ran).toEqual([["a"], ["b"], ["c"]]);
+    // Only a's retry is left: after the delay, not on the next tick.
+    expect((await config("t"))?.next_check_at).toBe("2026-12-02T13:15:00.000Z");
+
+    expect(await tick("2026-12-02T13:15:00.000Z")).toEqual(["a"]); // (2)
+    expect(await tick("2026-12-02T19:15:00.000Z")).toEqual(["a"]); // (3)
     expect(await config("t")).toMatchObject({
-      next_check_at: "2026-12-02T13:02:00.000Z",
-      last_error: "DataForSEO down",
+      next_check_at: "2027-01-02T07:00:00.000Z",
+      last_error: "a: a upstream down",
+    });
+  });
+
+  it("an account-wide failure stops the run, releases the lease and retries in six hours", async () => {
+    await client.executeMultiple(tracker("t", ["a"]));
+    mocks.behaviour.set("a", "no-credits");
+    await tick("2026-12-02T07:05:00.000Z");
+    expect(await config("t")).toMatchObject({
+      next_check_at: "2026-12-02T13:05:00.000Z",
+      last_error: "No credits",
+      lease_until: null,
     });
   });
 });

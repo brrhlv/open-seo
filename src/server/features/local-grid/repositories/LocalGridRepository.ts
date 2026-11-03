@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { runBatch } from "@/db/runBatch";
 import {
@@ -25,8 +25,9 @@ type LocalGridConfigValues = Omit<
   "id" | "createdAt" | "lastCheckedAt" | "lastError"
 >;
 
-// 11 bound columns per cell; D1 caps a statement at ~100 parameters.
-const CELLS_PER_INSERT = 8;
+// 10 bound columns per cell plus 3 for the snapshot lookup; D1 caps a
+// statement at ~100 parameters.
+const CELLS_PER_INSERT = 6;
 
 async function getConfigForProject(
   projectId: string,
@@ -53,14 +54,25 @@ async function upsertConfig(
   return row;
 }
 
-/** Tracker keywords in the order they were added. */
-async function listKeywords(configId: string): Promise<string[]> {
-  const rows = await db
-    .select({ keyword: localGridKeywords.keyword })
+type LocalGridKeywordRow = {
+  id: string;
+  keyword: string;
+  attempts: number;
+  attemptPeriod: string | null;
+};
+
+/** Tracker keywords in the order they were added, with this month's attempts. */
+async function listKeywords(configId: string): Promise<LocalGridKeywordRow[]> {
+  return db
+    .select({
+      id: localGridKeywords.id,
+      keyword: localGridKeywords.keyword,
+      attempts: localGridKeywords.attempts,
+      attemptPeriod: localGridKeywords.attemptPeriod,
+    })
     .from(localGridKeywords)
     .where(eq(localGridKeywords.configId, configId))
     .orderBy(asc(localGridKeywords.createdAt), asc(localGridKeywords.id));
-  return rows.map((row) => row.keyword);
 }
 
 /** Replace the tracker's keyword list in one atomic write. */
@@ -89,7 +101,18 @@ async function replaceKeywords(
   ]);
 }
 
-/** Active monthly trackers whose next check is due, oldest first. */
+/** Count a failed or degraded run against the keyword for the period. */
+async function recordAttempt(keywordId: string, period: string): Promise<void> {
+  await db
+    .update(localGridKeywords)
+    .set({
+      attempts: sql`case when ${localGridKeywords.attemptPeriod} = ${period} then ${localGridKeywords.attempts} + 1 else 1 end`,
+      attemptPeriod: period,
+    })
+    .where(eq(localGridKeywords.id, keywordId));
+}
+
+/** Active monthly trackers that are due and not held by a run, oldest first. */
 async function getDueConfigsWithOrganization(nowIso: string, limit: number) {
   return db
     .select({
@@ -105,6 +128,10 @@ async function getDueConfigsWithOrganization(nowIso: string, limit: number) {
         eq(localGridConfigs.isActive, true),
         eq(localGridConfigs.scheduleInterval, "monthly"),
         lte(localGridConfigs.nextCheckAt, nowIso),
+        or(
+          isNull(localGridConfigs.leaseUntil),
+          lte(localGridConfigs.leaseUntil, nowIso),
+        ),
         isNull(projects.archivedAt),
       ),
     )
@@ -113,22 +140,24 @@ async function getDueConfigsWithOrganization(nowIso: string, limit: number) {
 }
 
 /**
- * Compare-and-set the schedule anchor so two overlapping cron ticks cannot
- * both run the same tracker. Returns false when another writer moved it first.
+ * Take the tracker's run lease (compare-and-set), so a cron tick and an MCP
+ * run never grid the same tracker at once. false when another run holds it.
  */
-async function claimDueConfig(input: {
+async function acquireLease(input: {
   configId: string;
-  observedNextCheckAt: string;
-  nextCheckAt: string;
+  nowIso: string;
+  leaseUntil: string;
 }): Promise<boolean> {
   const claimed = await db
     .update(localGridConfigs)
-    .set({ nextCheckAt: input.nextCheckAt })
+    .set({ leaseUntil: input.leaseUntil })
     .where(
       and(
         eq(localGridConfigs.id, input.configId),
-        eq(localGridConfigs.isActive, true),
-        eq(localGridConfigs.nextCheckAt, input.observedNextCheckAt),
+        or(
+          isNull(localGridConfigs.leaseUntil),
+          lte(localGridConfigs.leaseUntil, input.nowIso),
+        ),
       ),
     )
     .returning({ id: localGridConfigs.id });
@@ -140,7 +169,7 @@ async function updateConfig(
   values: Partial<
     Pick<
       LocalGridConfig,
-      "lastCheckedAt" | "lastError" | "nextCheckAt" | "isActive"
+      "lastCheckedAt" | "lastError" | "nextCheckAt" | "isActive" | "leaseUntil"
     >
   >,
 ): Promise<void> {
@@ -150,13 +179,14 @@ async function updateConfig(
     .where(eq(localGridConfigs.id, configId));
 }
 
-/** Keywords that already have a snapshot for the period. */
-async function listCapturedKeywords(
-  projectId: string,
-  period: string,
-): Promise<string[]> {
-  const rows = await db
-    .select({ keyword: localGridSnapshots.keyword })
+/** The period's stored snapshots: keyword and how many points failed. */
+async function listPeriodSnapshots(projectId: string, period: string) {
+  return db
+    .select({
+      keyword: localGridSnapshots.keyword,
+      pointsSearched: localGridSnapshots.pointsSearched,
+      pointsFailed: localGridSnapshots.pointsFailed,
+    })
     .from(localGridSnapshots)
     .where(
       and(
@@ -164,18 +194,18 @@ async function listCapturedKeywords(
         eq(localGridSnapshots.period, period),
       ),
     );
-  return rows.map((row) => row.keyword);
 }
 
 /**
- * Store one keyword's grid for the month. A re-run in the same month replaces
- * the snapshot's figures and cells; its billing_cost_usd accumulates so the
- * month's total spend stays visible.
+ * Store one keyword's grid for the month in one atomic batch. A re-run in the
+ * same month replaces the snapshot's figures and cells; its billing_cost_usd
+ * accumulates so the month's total spend stays visible. The cells find their
+ * snapshot through its unique key, so no id round trip splits the batch.
  */
 async function saveSnapshot(
   snapshot: LocalGridSnapshotInsert,
   cells: LocalGridCellInsert[],
-): Promise<number> {
+): Promise<void> {
   const {
     projectId: _projectId,
     keyword: _keyword,
@@ -183,29 +213,26 @@ async function saveSnapshot(
     billingCostUsd: _billingCostUsd,
     ...replaced
   } = snapshot;
-  const [row] = await db
-    .insert(localGridSnapshots)
-    .values(snapshot)
-    .onConflictDoUpdate({
-      target: [
-        localGridSnapshots.projectId,
-        localGridSnapshots.keyword,
-        localGridSnapshots.period,
-      ],
-      set: {
-        ...replaced,
-        billingCostUsd: sql`${localGridSnapshots.billingCostUsd} + excluded.billing_cost_usd`,
-      },
-    })
-    .returning({ id: localGridSnapshots.id });
-  if (!row) throw new Error("Failed to upsert local_grid_snapshot");
-  const snapshotId = row.id;
-
+  const snapshotId = sql<number>`(select ${localGridSnapshots.id} from ${localGridSnapshots} where ${localGridSnapshots.projectId} = ${snapshot.projectId} and ${localGridSnapshots.keyword} = ${snapshot.keyword} and ${localGridSnapshots.period} = ${snapshot.period})`;
   const chunks: LocalGridCellInsert[][] = [];
   for (let i = 0; i < cells.length; i += CELLS_PER_INSERT) {
     chunks.push(cells.slice(i, i + CELLS_PER_INSERT));
   }
   await runBatch((tx) => [
+    tx
+      .insert(localGridSnapshots)
+      .values(snapshot)
+      .onConflictDoUpdate({
+        target: [
+          localGridSnapshots.projectId,
+          localGridSnapshots.keyword,
+          localGridSnapshots.period,
+        ],
+        set: {
+          ...replaced,
+          billingCostUsd: sql`${localGridSnapshots.billingCostUsd} + excluded.billing_cost_usd`,
+        },
+      }),
     tx.delete(localGridCells).where(eq(localGridCells.snapshotId, snapshotId)),
     ...chunks.map((chunk) =>
       tx
@@ -213,7 +240,6 @@ async function saveSnapshot(
         .values(chunk.map((cell) => ({ ...cell, snapshotId }))),
     ),
   ]);
-  return snapshotId;
 }
 
 /** Newest month first; never metered. */
@@ -248,10 +274,11 @@ export const LocalGridRepository = {
   upsertConfig,
   listKeywords,
   replaceKeywords,
+  recordAttempt,
   getDueConfigsWithOrganization,
-  claimDueConfig,
+  acquireLease,
   updateConfig,
-  listCapturedKeywords,
+  listPeriodSnapshots,
   saveSnapshot,
   listRecentSnapshots,
   listCells,

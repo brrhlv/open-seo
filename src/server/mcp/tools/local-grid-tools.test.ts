@@ -129,21 +129,31 @@ describe("local grid MCP tools", () => {
           costUsd: 0.018,
           pointsFound: 9,
           pointsSearched: 9,
+          pointsFailed: 0,
+          degraded: false,
           solvPct: 100,
           arp: 1.56,
           atrp: 1.56,
         },
       ],
+      failed: [{ keyword: "d", error: "upstream down" }],
       alreadyCaptured: ["b"],
       remaining: ["c"],
+      retry: ["d"],
+      gaveUp: ["e"],
       costUsd: 0.018,
+      nextCheckAt: "2026-11-02T13:00:00.000Z",
     });
     const text = textContent(
       await runLocalGridTool.handler({ projectId }, toolContext),
     );
     expect(text).toContain("DataForSEO cost: $0.0180");
     expect(text).toContain("Already gridded for 2026-11 (no credits used): b");
-    expect(text).toContain("Not run yet (over 3 per call): c");
+    expect(text).toContain("Not run yet: c");
+    expect(text).toContain("- d: failed (upstream down), will retry");
+    expect(text).toContain(
+      "left until next month (force: true to try anyway): e",
+    );
   });
 
   it("get_local_grid renders the grid north-first with the monthly change", async () => {
