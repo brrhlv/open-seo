@@ -6,6 +6,7 @@ import {
   isExpectedGrantFailure,
 } from "@/server/lib/gscErrors";
 import { getCached, setCached } from "@/server/lib/r2-cache";
+import { isExcludedPath } from "./excludedPaths";
 import { sectionErrorCode } from "./sectionErrorCode";
 
 // CLIENT-SBLV-194: the scored GSC × GA4 opportunity list (the
@@ -19,7 +20,9 @@ const CACHE_TTL_SECONDS = 6 * 60 * 60;
 // link does not cost two 1,000-row Google reads on every summary.
 const MISS_TTL_SECONDS = 10 * 60;
 // Bump when the cached shape changes.
-const CACHE_VERSION = "v2";
+const CACHE_VERSION = "v3";
+// Extra rows asked for, so dropping excluded paths still leaves ROW_LIMIT.
+const EXCLUDED_HEADROOM = 10;
 // A component at or above this percentile counts as a reason.
 const STRONG = 0.66;
 
@@ -83,14 +86,17 @@ function whyCodes(row: Row, businessValueMetric: string): string[] {
 }
 
 function shape(result: Result, now: Date): OpportunitiesSection {
+  const excluded = result.rows.filter((row) => isExcludedPath(row.page));
+  const kept = result.rows.filter((row) => !isExcludedPath(row.page));
   const metric = result.scoring.businessValueMetric;
   return {
     connected: true,
     capturedAt: now.toISOString(),
     dateRange: result.request.dateRange,
     businessValueMetric: metric,
-    totalCandidates: result.totalCandidateRows,
-    rows: result.rows.map((row) => ({
+    // Admin, API and sign-in routes are never opportunities (CLIENT-SBLV-197).
+    totalCandidates: result.totalCandidateRows - excluded.length,
+    rows: kept.slice(0, ROW_LIMIT).map((row) => ({
       page: row.page,
       score: row.score,
       why: whyCodes(row, metric),
@@ -132,7 +138,7 @@ export async function getOpportunitiesSection(
   let result: Result;
   try {
     result = await SearchOpportunityService.getOpportunities(
-      { projectId, limit: ROW_LIMIT },
+      { projectId, limit: ROW_LIMIT + EXCLUDED_HEADROOM },
       { now },
     );
   } catch (error) {
