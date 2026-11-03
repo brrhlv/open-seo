@@ -2,6 +2,7 @@ import { getDatabaseProvider } from "./provider";
 import * as sqliteApp from "./app.schema";
 import * as sqliteProjectContext from "./project-context.schema";
 import * as sqliteAiVisibility from "./ai-visibility.schema";
+import * as sqliteGbpWatch from "./gbp-watch.schema";
 import * as sqliteAudit from "./audit.schema";
 import * as sqliteSam from "./sam.schema";
 import * as sqliteAuth from "./better-auth-schema";
@@ -12,6 +13,7 @@ import * as sqliteTelemetry from "./telemetry.schema";
 import * as pgApp from "./pg/app.schema";
 import * as pgProjectContext from "./pg/project-context.schema";
 import * as pgAiVisibility from "./pg/ai-visibility.schema";
+import * as pgGbpWatch from "./pg/gbp-watch.schema";
 import * as pgAudit from "./pg/audit.schema";
 import * as pgSam from "./pg/sam.schema";
 import * as pgAuth from "./pg/better-auth-schema";
@@ -33,6 +35,7 @@ import * as pgTelemetry from "./pg/telemetry.schema";
 type AppSchema = typeof sqliteApp &
   typeof sqliteProjectContext &
   typeof sqliteAiVisibility &
+  typeof sqliteGbpWatch &
   typeof sqliteAudit &
   typeof sqliteSam &
   typeof sqliteAuth &
@@ -47,6 +50,7 @@ const runtimeSchema =
         ...pgApp,
         ...pgProjectContext,
         ...pgAiVisibility,
+        ...pgGbpWatch,
         ...pgAudit,
         ...pgSam,
         ...pgAuth,
@@ -59,6 +63,7 @@ const runtimeSchema =
         ...sqliteApp,
         ...sqliteProjectContext,
         ...sqliteAiVisibility,
+        ...sqliteGbpWatch,
         ...sqliteAudit,
         ...sqliteSam,
         ...sqliteAuth,
@@ -87,6 +92,8 @@ export const {
   backlinkSnapshots,
   aiVisibilityConfigs,
   aiVisibilitySnapshots,
+  gbpConfigs,
+  gbpSnapshots,
   projectContextSections,
   projectCompetitors,
   projectKeyPages,
