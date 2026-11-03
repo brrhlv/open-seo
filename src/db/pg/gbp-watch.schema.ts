@@ -53,6 +53,9 @@ export const gbpSnapshots = pgTable(
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    // The profile this row is about ("cid:…" / "place_id:…"). A row for a
+    // different identifier than the one before starts a new baseline.
+    identifier: text("identifier"),
     title: text("title"),
     primaryCategory: text("primary_category"),
     additionalCategoriesJson: text("additional_categories_json")

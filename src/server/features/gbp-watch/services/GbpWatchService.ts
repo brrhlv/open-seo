@@ -14,9 +14,11 @@ import {
   profileFromRow,
   readReviews,
   readUpdates,
+  sameProfileRun,
   snapshotInsert,
 } from "@/server/features/gbp-watch/gbpSnapshotCodec";
 import {
+  carryForwardOmitted,
   diffProfiles,
   driftFromExpected,
 } from "@/server/features/gbp-watch/gbpWatchDiff";
@@ -195,19 +197,26 @@ async function runSnapshot(input: {
   }
   const now = input.now ?? new Date();
   const capturedAt = now.toISOString();
-  const history = await GbpWatchRepository.listRecentSnapshots(
+  const keyword = config.cid
+    ? `cid:${config.cid}`
+    : `place_id:${config.placeId}`;
+  const latestRows = await GbpWatchRepository.listRecentSnapshots(
     input.projectId,
     PREVIOUS_ROWS,
   );
+  // Only rows about this profile count as "before" (a new cid or place_id
+  // starts a new baseline); the one-hour guard looks at any row.
+  const history = sameProfileRun(latestRows, keyword);
   const [previous] = history;
+  const [lastRun] = latestRows;
   if (
     !input.force &&
-    previous &&
-    now.getTime() - Date.parse(previous.capturedAt) < RECENT_RUN_MS
+    lastRun &&
+    now.getTime() - Date.parse(lastRun.capturedAt) < RECENT_RUN_MS
   ) {
     return {
       status: "already_captured",
-      capturedAt: previous.capturedAt,
+      capturedAt: lastRun.capturedAt,
       costUsd: 0,
       changes: 0,
       drift: 0,
@@ -219,9 +228,6 @@ async function runSnapshot(input: {
   const client = createDataforseoClient(input.billingCustomer, {
     onCost: (usd) => (costUsd += usd),
   });
-  const keyword = config.cid
-    ? `cid:${config.cid}`
-    : `place_id:${config.placeId}`;
   const { locationCode, languageCode } = input.market;
 
   let item: Record<string, unknown> | null;
@@ -242,7 +248,9 @@ async function runSnapshot(input: {
     await GbpWatchRepository.updateConfig(config.id, { lastError: message });
     throw new AppError("UPSTREAM_UNAVAILABLE", message);
   }
-  const profile = normalizeProfile(item);
+  const profile = previous
+    ? carryForwardOmitted(profileFromRow(previous), normalizeProfile(item))
+    : normalizeProfile(item);
 
   const pollMs = input.pollIntervalMs ?? TASK_POLL_INTERVAL_MS;
   const { latitude, longitude } = profile;
@@ -319,6 +327,7 @@ async function runSnapshot(input: {
   await GbpWatchRepository.insertSnapshot(
     snapshotInsert({
       projectId: input.projectId,
+      identifier: keyword,
       capturedAt,
       profile,
       reviews,
@@ -328,9 +337,16 @@ async function runSnapshot(input: {
       costUsd,
     }),
   );
+  // The paid work is stored. From here nothing may throw: a caller treats a
+  // throw as "nothing was saved" and may pay for a retry.
   await GbpWatchRepository.updateConfig(config.id, {
     lastCheckedAt: capturedAt,
     lastError: null,
+  }).catch((error: unknown) => {
+    console.error(
+      `[gbp-watch] snapshot saved, but config ${config.id} was not updated:`,
+      error,
+    );
   });
   return {
     status: "checked",

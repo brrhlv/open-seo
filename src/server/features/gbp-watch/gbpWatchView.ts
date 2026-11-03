@@ -6,6 +6,7 @@ import type {
 import { toIsoTimestamp } from "@/server/features/public-api/timestamps";
 import {
   profileFromRow,
+  sameProfileRun,
   readChanges,
   readQuestions,
   readReviews,
@@ -192,9 +193,11 @@ function updatesView(rows: GbpSnapshotRow[]): GbpWatchView["ownerUpdates"] {
 /** `rows` newest first (GbpWatchRepository.listRecentSnapshots). */
 export function buildGbpWatchView(
   config: GbpConfig | null,
-  rows: GbpSnapshotRow[],
+  allRows: GbpSnapshotRow[],
   now: Date,
 ): GbpWatchView {
+  // Rows about an earlier cid / place_id are a different baseline.
+  const rows = sameProfileRun(allRows);
   const [latest, previous] = rows;
   // Lists come from the newest snapshot that collected them.
   const reviews = rows.map(readReviews).find((list) => list !== null) ?? [];

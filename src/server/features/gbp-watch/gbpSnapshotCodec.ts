@@ -85,6 +85,24 @@ export const readUpdates = (row: GbpSnapshotRow): GbpUpdate[] | null =>
 export const readChanges = (row: GbpSnapshotRow): GbpChange[] =>
   parseJson(row.changesJson, z.array(changeSchema)) ?? [];
 
+/**
+ * The leading rows about the same profile as the newest one: a changed cid
+ * or place_id starts a new baseline (no diff, nothing "new"). Rows from
+ * before identifiers were stored (null) count as the same profile.
+ */
+export function sameProfileRun<T extends Pick<GbpSnapshotRow, "identifier">>(
+  rows: T[],
+  identifier: string | null = rows[0]?.identifier ?? null,
+): T[] {
+  const end = rows.findIndex(
+    (row) =>
+      row.identifier !== null &&
+      identifier !== null &&
+      row.identifier !== identifier,
+  );
+  return end === -1 ? rows : rows.slice(0, end);
+}
+
 export function profileFromRow(row: GbpSnapshotRow): GbpProfile {
   const hours: GbpHours | null = parseJson(row.hoursJson, hoursSchema);
   return {
@@ -111,6 +129,7 @@ const toJson = <T>(value: T | null): string | null =>
 
 export function snapshotInsert(input: {
   projectId: string;
+  identifier: string;
   capturedAt: string;
   profile: GbpProfile;
   reviews: GbpReview[] | null;
@@ -122,6 +141,7 @@ export function snapshotInsert(input: {
   const { profile } = input;
   return {
     projectId: input.projectId,
+    identifier: input.identifier,
     title: profile.title,
     primaryCategory: profile.primaryCategory,
     additionalCategoriesJson: JSON.stringify(profile.additionalCategories),

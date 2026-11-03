@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   },
   fetchTask: vi.fn(),
   onCost: { current: undefined as ((usd: number) => void) | undefined },
+  failConfigWrites: { current: false },
 }));
 
 vi.mock("@/server/lib/dataforseo", () => ({
@@ -56,6 +57,7 @@ vi.mock("@/server/features/gbp-watch/repositories/GbpWatchRepository", () => ({
       return row;
     },
     updateConfig: async (id: string, values: Partial<GbpConfig>) => {
+      if (mocks.failConfigWrites.current) throw new Error("d1 write failed");
       for (const [key, config] of mocks.configs) {
         if (config.id === id) mocks.configs.set(key, { ...config, ...values });
       }
@@ -106,6 +108,7 @@ function run(now: Date, force = false) {
 }
 
 beforeEach(() => {
+  mocks.failConfigWrites.current = false;
   mocks.configs.clear();
   mocks.snapshots.length = 0;
   mocks.business.myBusinessInfo.mockImplementation(async () => {
@@ -277,6 +280,56 @@ describe("GbpWatchService", () => {
     expect(mocks.snapshots).toHaveLength(0);
     expect(mocks.configs.get(PROJECT)?.lastError).toContain("no profile");
     expect(mocks.business.reviewsTaskPost).not.toHaveBeenCalled();
+  });
+
+  it("keeps hours, claim status and categories DataForSEO leaves out, and reports no change", async () => {
+    await createWatch();
+    await run(MON);
+    const omitted: Record<string, unknown> = structuredClone(profileFixture);
+    delete omitted.work_time;
+    delete omitted.is_claimed;
+    omitted.additional_categories = null;
+    mocks.business.myBusinessInfo.mockResolvedValue(omitted);
+    expect((await run(NEXT_MON)).changes).toBe(0);
+    expect(mocks.snapshots[0]).toMatchObject({
+      isClaimed: true,
+      hoursJson: mocks.snapshots[1]?.hoursJson,
+      additionalCategoriesJson: mocks.snapshots[1]?.additionalCategoriesJson,
+    });
+  });
+
+  it("starts a new baseline when the watch points at another profile", async () => {
+    await createWatch();
+    await run(MON);
+    await GbpWatchService.setWatch({ projectId: PROJECT, cid: "123" });
+    mocks.business.myBusinessInfo.mockResolvedValue({
+      ...structuredClone(profileFixture),
+      title: "Another business",
+      category: "Event planner",
+    });
+    mocks.fetchTask.mockImplementation(
+      async ({ endpoint }: { endpoint: string }) => ({
+        status: "completed",
+        result:
+          endpoint === "reviews"
+            ? { items: reviewsFixture.items.slice(0, 5) }
+            : { items: [] },
+      }),
+    );
+    expect((await run(NEXT_MON)).changes).toBe(0);
+    expect(mocks.snapshots[0]?.identifier).toBe("cid:123");
+
+    const view = await GbpWatchService.getWatch(PROJECT, NEXT_MON);
+    expect(view.newReviewCount).toBe(0);
+    expect(view.rating.previousValue).toBeNull();
+    expect(view.driftFromExpected[0]?.since).toBe(NEXT_MON.toISOString());
+  });
+
+  it("keeps a saved snapshot when only the config write after it fails", async () => {
+    await createWatch();
+    mocks.failConfigWrites.current = true;
+    expect((await run(MON)).status).toBe("checked");
+    expect(mocks.snapshots).toHaveLength(1);
   });
 
   it("reads an untracked project as empty", async () => {
