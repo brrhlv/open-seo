@@ -1,0 +1,71 @@
+{
+  "reviews_count": 113,
+  "items": [
+    {
+      "review_id": "Ci9DQUlRQUNvZENodHljRjlvT2xoQ00xQlpTMUIzWWt0RlNFWTJOSGhRWWxrNU5sRRAB",
+      "profile_name": "Reviewer A",
+      "rating": {
+        "value": 5
+      },
+      "review_text": "Christine was amazing to work with from start to finish. She was thorough, respo",
+      "timestamp": "2026-10-29 14:38:59 +00:00",
+      "owner_answer": null,
+      "owner_timestamp": null
+    },
+    {
+      "review_id": "Ci9DQUlRQUNvZENodHljRjlvT2tjME16RjZUMlZ3UjNJdFMyMWZTVFUwTVVWbGNGRRAB",
+      "profile_name": "Reviewer B",
+      "rating": {
+        "value": 5
+      },
+      "review_text": "We celebrated my wife\u2019s 40th Birthday in Vegas.  Coordinating with Christine was",
+      "timestamp": "2026-10-22 01:27:29 +00:00",
+      "owner_answer": "Thank you!",
+      "owner_timestamp": "2026-10-27 07:20:41 +00:00"
+    },
+    {
+      "review_id": "Ci9DQUlRQUNvZENodHljRjlvT2tKeU5UWTBSVVUxWkRkYWQweEZhRkZqUWtkb2JuYxAB",
+      "profile_name": "Reviewer C",
+      "rating": {
+        "value": 5
+      },
+      "review_text": "Christine is amazing she knows what she's doing. I had a wonderful experience wo",
+      "timestamp": "2026-10-17 23:06:37 +00:00",
+      "owner_answer": null,
+      "owner_timestamp": null
+    },
+    {
+      "review_id": "Ci9DQUlRQUNvZENodHljRjlvT25wMVdVTk9OaTFUWVRjeE1rbGFZemhsVlUxUVUzYxAB",
+      "profile_name": "Reviewer D",
+      "rating": {
+        "value": 5
+      },
+      "review_text": "We hosted our annual company offsite in Las Vegas and Social Booth LV was great ",
+      "timestamp": "2026-09-16 14:04:44 +00:00",
+      "owner_answer": "Thank you!",
+      "owner_timestamp": "2026-10-03 07:20:41 +00:00"
+    },
+    {
+      "review_id": "Ci9DQUlRQUNvZENodHljRjlvT2pRNFdHaGpTMkpmVlZaallsQjZXa3hLVVRaa2MxRRAB",
+      "profile_name": "Reviewer E",
+      "rating": {
+        "value": 5
+      },
+      "review_text": "Social Booth LV provided the photo booth for our company event in Las Vegas, and",
+      "timestamp": "2026-08-26 21:15:06 +00:00",
+      "owner_answer": null,
+      "owner_timestamp": null
+    },
+    {
+      "review_id": "Ci9DQUlRQUNvZENodHljRjlvT21odmRrbHdhVzlpYmxCbk5VdFFiMG8zTWpWc1NtYxAB",
+      "profile_name": "Reviewer F",
+      "rating": {
+        "value": 5
+      },
+      "review_text": "Such a great display. Very elegant and very well done.",
+      "timestamp": "2026-08-16 21:49:39 +00:00",
+      "owner_answer": null,
+      "owner_timestamp": null
+    }
+  ]
+}
