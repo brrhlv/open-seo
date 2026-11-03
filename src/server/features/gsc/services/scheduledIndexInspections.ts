@@ -15,6 +15,9 @@ import { isHostedServerAuthMode } from "@/server/lib/runtime-env";
 export const INSPECTIONS_PER_TICK = 8;
 const DAY_MS = 24 * 60 * 60_000;
 
+/** A host without a leading www, lowercased. */
+const bareHost = (host: string) => host.toLowerCase().replace(/^www\./, "");
+
 /**
  * The URL to send to GSC for a key page, or null when it is outside the
  * property. Domain properties (`sc-domain:example.com`) take the stored URL
@@ -42,8 +45,7 @@ export function inspectionUrlFor(
   } catch {
     return null;
   }
-  const bare = (host: string) => host.toLowerCase().replace(/^www\./, "");
-  if (bare(page.hostname) !== bare(prefix.hostname)) return null;
+  if (bareHost(page.hostname) !== bareHost(prefix.hostname)) return null;
   const rebased = new URL(`${page.pathname}${page.search}`, prefix.origin).href;
   return rebased.startsWith(siteUrl) || `${rebased}/` === siteUrl
     ? rebased

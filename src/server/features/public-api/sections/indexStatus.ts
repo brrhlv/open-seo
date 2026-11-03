@@ -1,4 +1,4 @@
-import { sortBy } from "remeda";
+import { sort, sortBy } from "remeda";
 import { GscConnectionRepository } from "@/server/features/gsc/repositories/GscConnectionRepository";
 import {
   UrlInspectionRepository,
@@ -58,10 +58,12 @@ export async function getIndexStatusSection(projectId: string) {
     keyPages.map((page) => toPage(page.url, byUrl.get(page.url))),
     (page) => page.url,
   );
-  const stamps = pages
-    .map((page) => page.inspectedAt)
-    .filter((stamp): stamp is string => stamp !== null)
-    .sort();
+  const stamps = sort(
+    pages
+      .map((page) => page.inspectedAt)
+      .filter((stamp): stamp is string => stamp !== null),
+    (a, b) => a.localeCompare(b),
+  );
   const oldest = stamps[0];
   const counts = { indexed: 0, notIndexed: 0, failed: 0, pending: 0 };
   for (const page of pages) {
