@@ -169,6 +169,13 @@
       "when": 1791532876416,
       "tag": "0023_ai_visibility",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793740158858,
+      "tag": "0024_gbp_watch",
+      "breakpoints": true
     }
   ]
 }
