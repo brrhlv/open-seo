@@ -66,11 +66,28 @@ describe("runScheduledGbpSnapshots", () => {
     expect(mocks.runSnapshot).not.toHaveBeenCalled();
   });
 
-  it("retries a failed run in 6 hours", async () => {
+  it("retries a failed Monday run once, 6 hours later", async () => {
     mocks.runSnapshot.mockRejectedValue(new Error("DataForSEO down"));
     await runScheduledGbpSnapshots(NOW);
     expect(mocks.updateConfig).toHaveBeenCalledWith("cfg-1", {
+      lastError: "DataForSEO down",
       nextCheckAt: "2026-11-09T20:00:00.000Z",
+    });
+  });
+
+  it("waits for next Monday when the retry fails too", async () => {
+    const retryAt = new Date("2026-11-09T20:00:00Z");
+    mocks.getDueConfigs.mockResolvedValue([
+      { ...due, nextCheckAt: retryAt.toISOString() },
+    ]);
+    mocks.runSnapshot.mockRejectedValue(new Error("DataForSEO down"));
+    await runScheduledGbpSnapshots(retryAt);
+    expect(mocks.claimDueConfig).toHaveBeenCalledWith(
+      expect.objectContaining({ nextCheckAt: "2026-11-16T14:00:00.000Z" }),
+    );
+    // Only the error is recorded; the claim already moved the run to Monday.
+    expect(mocks.updateConfig).toHaveBeenCalledWith("cfg-1", {
+      lastError: "DataForSEO down",
     });
   });
 });

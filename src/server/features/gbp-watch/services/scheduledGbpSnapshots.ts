@@ -9,8 +9,18 @@ import {
 // 50-subrequest cap. Unprocessed watches stay due for the next tick.
 const GBP_SNAPSHOTS_PER_TICK = 1;
 
-// A failed run retries after this delay instead of waiting a week.
+// A failed Monday run retries once after this delay; a failed retry waits
+// for the next Monday. Every attempt is a paid call.
 const RETRY_DELAY_MS = 6 * 60 * 60_000;
+
+/**
+ * Monday 14:00 UTC is the weekly slot (nextWeeklyCheckAt); anything else is
+ * the retry (or a hand-set "run now"), which never schedules another retry.
+ */
+function isWeeklySlot(iso: string): boolean {
+  const at = new Date(iso);
+  return at.toISOString() === nextWeeklyCheckAt(new Date(at.getTime() - 1));
+}
 
 /**
  * Cron body (CLIENT-SBLV-193): snapshot every weekly GBP watch that is due.
@@ -65,11 +75,22 @@ export async function runScheduledGbpSnapshots(now = new Date()) {
         `[cron] GBP snapshot failed for project ${config.projectId}:`,
         err,
       );
-      await GbpWatchRepository.updateConfig(config.id, {
-        nextCheckAt: new Date(now.getTime() + RETRY_DELAY_MS).toISOString(),
-      }).catch((writeErr: unknown) => {
+      // runSnapshot throws only when nothing was saved (see GbpWatchService),
+      // so a retry never pays twice for a stored snapshot.
+      const message = err instanceof Error ? err.message : String(err);
+      await GbpWatchRepository.updateConfig(
+        config.id,
+        isWeeklySlot(config.nextCheckAt)
+          ? {
+              lastError: message,
+              nextCheckAt: new Date(
+                now.getTime() + RETRY_DELAY_MS,
+              ).toISOString(),
+            }
+          : { lastError: message },
+      ).catch((writeErr: unknown) => {
         console.error(
-          `[cron] Could not reschedule GBP watch ${config.id}:`,
+          `[cron] Could not record the GBP failure for ${config.id}:`,
           writeErr,
         );
       });
