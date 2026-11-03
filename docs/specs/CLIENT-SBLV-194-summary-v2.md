@@ -105,7 +105,7 @@ type IndexStatus =
   | {
       connected: true;
       capturedAt: string | null; // newest inspectedAt; null before the first run
-      nextCheckAfter: string | null; // oldest inspectedAt + 24 h (when the cron may refresh)
+      nextCheckAfter: string | null; // earliest next_check_at (when the cron may refresh)
       counts: {
         indexed: number;
         notIndexed: number;
@@ -117,6 +117,8 @@ type IndexStatus =
         url: string; // the key page URL (as stored in project context)
         inspectedUrl: string | null; // the URL actually sent to GSC (rebased on URL-prefix properties)
         state: "indexed" | "not_indexed" | "failed" | "pending";
+        // From the last good verdict, even if a later check failed. "failed" only when there
+        // was never a verdict (an error, or a result without one); "pending" before any result.
         verdict: string | null; // GSC: PASS | PARTIAL | FAIL | NEUTRAL | VERDICT_UNSPECIFIED
         coverageState: string | null; // e.g. "Submitted and indexed", "Crawled - currently not indexed"
         indexingState: string | null;
@@ -127,8 +129,9 @@ type IndexStatus =
         canonicalMismatch: boolean; // both canonicals set and different
         lastCrawlTime: string | null;
         crawledAs: string | null; // DESKTOP | MOBILE
-        inspectedAt: string | null;
-        error: string | null; // per-URL failure text; state "failed"
+        inspectedAt: string | null; // when the result above was taken
+        checkedAt: string | null; // the last attempt, set only when it failed
+        error: string | null; // the last attempt's failure; null after a success
       }>;
     };
 
@@ -140,23 +143,25 @@ type Ga4KeyEvents =
       dateRange: { startDate: string; endDate: string }; // = the summary range
       events: Array<{
         eventName: string;
-        keyEvents: number;
-        previousKeyEvents: number | null;
-      }>; // organic, most first
+        keyEvents: number; // ALL channels (broken tracking silences every channel)
+        previousKeyEvents: number | null; // all channels, the period before
+        organicKeyEvents: number; // organic search only
+      }>; // most first
       landingPages: Array<{
         // organic landing pages with sessions, most key events first, max 25
-        page: string; // host + path, e.g. "socialboothlv.com/corporate-events"
+        page: string; // host without www + path, e.g. "socialboothlv.com/corporate-events" (www and bare merged)
         sessions: number;
         keyEvents: number;
         keyEventRate: number; // sessionKeyEventRate, 0..1
         events: Array<{ eventName: string; keyEvents: number }>;
       }>;
       tracking: {
-        status: "ok" | "silent" | "no_key_events";
+        status: "ok" | "silent" | "no_key_events" | "no_organic_key_events";
         silentEvents: string[];
       };
-      // "silent": an event had key events in the previous period and none now (tracking may be broken)
-      // "no_key_events": the property has no key event with a count in either period
+      // "silent": an event had >= 5 key events (all channels) last period and none now
+      // "no_key_events": no key event counted on any channel in either period
+      // "no_organic_key_events": key events count, just none from organic search this period
     };
 ```
 
@@ -272,9 +277,11 @@ url_inspections
   verdict, coverage_state, indexing_state, robots_txt_state, page_fetch_state,
   google_canonical, user_canonical, last_crawl_time, crawled_as   text null
   error          text null            -- per-URL failure (state "failed")
-  inspected_at   text not null        -- ISO
+  inspected_at   text null            -- ISO, when the result fields were taken (null until a success)
+  attempted_at   text not null        -- ISO, the last attempt (or lease start)
+  next_check_at  text not null        -- ISO, success +24 h, failure +1 h, lease +15 min
   unique (project_id, url)
-  index  (project_id, inspected_at)
+  index  (next_check_at)
 ```
 
 Migrations: `drizzle/0046_<name>.sql` and `drizzle-pg/0024_<name>.sql` via `pnpm exec drizzle-kit generate`
@@ -284,37 +291,61 @@ Migrations: `drizzle/0046_<name>.sql` and `drizzle-pg/0024_<name>.sql` via `pnpm
 
 - Runs inside the existing `scheduled` handler on the `*/5` tick, after the AI-visibility block,
   in its own try/catch. No new cron expression.
-- Self-host only (`isHostedServerAuthMode()` → skip).
-- Each tick: list projects with a GSC connection; for each, its key pages and stored rows;
-  a URL is **due** when it has no row or `inspected_at` is older than 24 h. Take the first
-  project (by id) with due URLs and inspect up to **8** of them (Workers Free: 50 subrequests
-  per invocation, shared with rank checks and AI visibility). The rest wait for the next tick.
-- So every URL is inspected at most once a day. SBLV's 19 key pages finish in 3 ticks;
-  all 9 connected projects (~140 key pages) in ~18 ticks (~1.5 h) once a day.
-- A per-URL failure is stored with `error` and `inspected_at = now`, so it is retried
-  tomorrow, not every 5 minutes. A token/grant failure for the project stores the same
-  error on every due URL in that batch.
+- Self-host only (`isHostedServerAuthMode()` → skip). In hosted mode the section answers
+  `{ connected: false }`.
+- Each tick lists due key pages of live, GSC-connected projects: no row yet first, then the
+  oldest `next_check_at`, across projects. It takes up to **8** (Workers Free: 50 subrequests per
+  invocation, shared with rank checks and AI visibility) and leases each one (compare-and-set
+  `next_check_at` → now + 15 min) so an overlapping tick skips it. A 3-minute deadline, like the
+  sibling schedulers, stops a slow tick; unprocessed pages come due when their lease lapses.
+- A success replaces the result fields, clears `error`, sets `inspected_at` and checks again in
+  24 h. SBLV's 19 key pages finish in 3 ticks; all 9 connected projects (~140 key pages) in
+  ~18 ticks (~1.5 h) once a day.
+- A failure (per URL, or a token/grant failure for the whole project) records only `error`,
+  `attempted_at` and `next_check_at = now + 1 h`. The last good verdict and coverage stay, so a
+  transient error never turns an indexed page into "Check failed".
 - URL to inspect: `sc-domain:` property → the key page URL as stored. URL-prefix property
   (`https://www.example.com/`) → the key page's path + query rebased onto the property origin
-  (key pages are stored without `www`). A URL outside the property is stored as failed.
+  (key pages are stored without `www`). A URL outside the property is stored as failed and
+  checked again in 24 h.
 - No key pages → nothing inspected; the section returns `pages: []`.
 
 ## Opportunities cache
 
 - R2 soft-TTL cache (`getCached` / `setCached`, `r2-cache.ts`), key
-  `public-summary:opportunities:<projectId>`, TTL 6 h. Stores the shaped section
-  (with `capturedAt`). A miss calls `SearchOpportunityService.getOpportunities({ projectId, limit: 25 })`.
-- The window is the service default (28 complete GA4 days ending 3 days ago), independent of
-  the summary `range`, because "what to work on next" should not jump with a range pill.
-- Unlinked (`ga4_not_connected`, `GscNotConnectedError`, expected grant failure) → `{connected:false}`, not cached.
+  `public-summary:opportunities:v2:<projectId>` (bump the version when the shape changes).
+  A success is kept 6 h. Unlinked (`ga4_not_connected`, `GscNotConnectedError`, expected grant
+  failure → `{connected:false}`) and failed reads (`{ error: <code> }`) are kept 10 minutes, so an
+  outage does not cost two 1,000-row Google reads on every summary.
+- A miss calls `SearchOpportunityService.getOpportunities({ projectId, limit: 25 })`. The window is
+  the service default (28 complete GA4 days ending 3 days ago), independent of the summary
+  `range`, because "what to work on next" should not jump with a range pill.
+
+## Audit pages
+
+- Issue-type counts per severity, worst-first order and the 250-page limit are SQL
+  (`auditPageQueries.ts`); issue rows come back grouped by (page, type, severity) with an
+  occurrence count, so the Worker never parses one row per occurrence.
+- A completed audit never changes: its shaped section is cached in R2 under
+  `public-summary:audit-pages:v1:<auditId>` for 30 days. A running audit is never cached.
+
+## Google tokens
+
+The summary handler runs inside `withSharedAccessTokens` (AsyncLocalStorage): every GSC and GA4
+client built during one summary shares one Better Auth token mint per grant.
 
 ## Key events
 
-Three GA4 Data API calls in parallel with the rest of the `ga4` section (organic channel,
-the summary dates): `key_events` breakdown `event` with `comparePreviousPeriod`,
-`key_events` breakdown `event_and_landing_page` (limit 250), `landing_pages` (limit 25).
-Merged by normalized `host + path`. Settled separately: a failure is `ga4.keyEvents = {error}`
-and leaves the rest of `ga4` intact.
+Three GA4 Data API calls in parallel with the rest of the `ga4` section, over the summary dates:
+
+- `key_events` breakdown `event` with `comparePreviousPeriod`, **all channels**: broken tracking
+  silences every channel, so silence is judged there. An event is `silent` when it had at least
+  5 key events last period and none now.
+- `key_events` breakdown `event_and_landing_page` (limit 250), organic.
+- `landing_pages` (limit 250), organic.
+
+Pages merge by host (without `www`) + path; the rate of a merged page is weighted by sessions.
+Settled separately: a failure is `ga4.keyEvents = {error}` and leaves the rest of `ga4` intact.
 
 ## Cost per month
 
@@ -330,16 +361,21 @@ and leaves the rest of `ga4` intact.
 
 - `sections/opportunities.test.ts`: shaping (score order, why codes, unmatched rows), not-connected
   → `{connected:false}`, cache hit skips the service, cache miss writes.
-- `sections/auditPages.test.ts`: real SQL over in-memory SQLite from the shipped audit migrations —
-  latest completed audit preferred, issues grouped per page with counts, Lighthouse by strategy,
-  no audit → `status:"none"`.
-- `sections/indexStatus.test.ts`: state mapping (PASS → indexed, FAIL/NEUTRAL → not_indexed,
-  error → failed, no row → pending), canonical mismatch, counts, not connected.
-- `scheduledIndexInspections.test.ts`: real due query over in-memory SQLite, only `inspectUrls` mocked —
-  due selection (missing / older than 24 h), 8-per-tick cap, failure stored with backoff,
-  URL-prefix rebasing, hosted mode skips.
-- `sections/ga4KeyEvents.test.ts`: merge by landing page, silent-event detection, no key events.
-- `PublicSummaryService.test.ts`: the four keys present; one failing section leaves the others.
+- `auditPageQueries.test.ts`: real SQL over in-memory SQLite — issue-type counts per severity,
+  worst-first order, the limit, grouped occurrences.
+- `sections/auditPages.test.ts`: shaping, Lighthouse by strategy, R2 cache hit/miss, a running
+  audit never cached, the cut flag, no audit → `status:"none"`.
+- `sections/indexStatus.test.ts`: states (a failed check keeps the last verdict; no verdict and
+  no error → failed; leased → pending), canonical mismatch, counts, unlinked and hosted.
+- `scheduledIndexInspections.test.ts`: real due query, lease and writes over in-memory SQLite,
+  only `inspectUrls` mocked — staleness order across projects, 8-per-tick cap, failures keep the
+  result and retry in 1 h, overlapping ticks skip leased pages, URL-prefix rebasing, hosted mode.
+- `sections/ga4KeyEvents.test.ts`: all-channel comparison, organic pages, www merge, silent needs 5,
+  `no_key_events` vs `no_organic_key_events`.
+- `sections/opportunities.test.ts`: shaping, cache hit, unlinked and errors kept 10 minutes.
+- `sharedAccessTokens.test.ts`: one mint per grant inside a scope, none shared outside, failures not shared.
+- `PublicSummaryService.test.ts`: the existing keys and the v2 keys in order; one failing section
+  leaves the others; a key-events failure keeps `ga4`.
 - Gate: tsc, `pnpm exec vitest run` (baseline: 1 known failure, `samSkills.test.ts`), oxlint,
   `pnpm exec vite build --mode selfhost`.
 
