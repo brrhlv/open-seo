@@ -24,6 +24,11 @@ import { runRankTrackerTool } from "@/server/mcp/tools/run-rank-tracker";
 import { createAiVisibilityTrackerTool } from "@/server/mcp/tools/create-ai-visibility-tracker";
 import { getAiVisibilityTool } from "@/server/mcp/tools/get-ai-visibility";
 import { runAiVisibilityCheckTool } from "@/server/mcp/tools/run-ai-visibility-check";
+import { addAiVisibilityPromptsTool } from "@/server/mcp/tools/add-ai-visibility-prompts";
+import { getAiVisibilityPromptResultsTool } from "@/server/mcp/tools/get-ai-visibility-prompt-results";
+import { listAiVisibilityPromptsTool } from "@/server/mcp/tools/list-ai-visibility-prompts";
+import { removeAiVisibilityPromptsTool } from "@/server/mcp/tools/remove-ai-visibility-prompts";
+import { runAiVisibilityPromptsTool } from "@/server/mcp/tools/run-ai-visibility-prompts";
 import { getSerpResultsTool } from "@/server/mcp/tools/get-serp-results";
 import {
   getGoogleAnalyticsAudienceBreakdownTool,
@@ -182,6 +187,11 @@ export function createOpenSeoMcpServer(authProps: McpProps) {
   register(getAiVisibilityTool);
   register(createAiVisibilityTrackerTool);
   register(runAiVisibilityCheckTool);
+  register(addAiVisibilityPromptsTool);
+  register(listAiVisibilityPromptsTool);
+  register(removeAiVisibilityPromptsTool);
+  register(runAiVisibilityPromptsTool);
+  register(getAiVisibilityPromptResultsTool);
   register(getRankedKeywordsTool);
   register(findSerpCompetitorsTool);
   register(searchLocalBusinessesTool);

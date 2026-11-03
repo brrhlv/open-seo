@@ -141,6 +141,34 @@ const toolCategories: ToolCategory[] = [
         title: "Run AI visibility check",
         description: "Capture this month's AI visibility snapshot now.",
       },
+      {
+        name: "add_ai_visibility_prompts",
+        title: "Add buyer prompts",
+        description:
+          "Ask ChatGPT, AI Mode and Perplexity your buyer prompts monthly.",
+      },
+      {
+        name: "list_ai_visibility_prompts",
+        title: "List buyer prompts",
+        description: "List the tracked buyer prompts and their schedule.",
+      },
+      {
+        name: "remove_ai_visibility_prompts",
+        title: "Remove buyer prompts",
+        description: "Stop tracking buyer prompts; history is kept.",
+      },
+      {
+        name: "run_ai_visibility_prompts",
+        title: "Run buyer prompts",
+        description:
+          "Ask the buyer prompts now and store this month's answers.",
+      },
+      {
+        name: "get_ai_visibility_prompt_results",
+        title: "Get buyer prompt results",
+        description:
+          "Read mention, position and cited page per prompt and platform.",
+      },
     ],
   },
   {
