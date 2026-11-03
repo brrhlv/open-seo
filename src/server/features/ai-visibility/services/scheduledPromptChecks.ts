@@ -17,7 +17,7 @@ const PROMPTS_PER_TICK = PROMPT_CONCURRENCY;
  * can't read; elapsed time is the available proxy for a heavy tick. Due
  * prompts simply wait for the next tick.
  */
-export const PROMPT_PHASE_MAX_TICK_ELAPSED_MS = 60_000;
+const PROMPT_PHASE_MAX_TICK_ELAPSED_MS = 60_000;
 
 type DueRow = Awaited<
   ReturnType<typeof AiVisibilityPromptRepository.getDuePromptsWithOrganization>

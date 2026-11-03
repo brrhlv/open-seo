@@ -28,8 +28,8 @@ const LANGUAGE_CODE = "en";
 const PERPLEXITY_MODEL = "sonar";
 const PERPLEXITY_MAX_OUTPUT_TOKENS = 1024;
 
-export const MAX_ATTEMPTS_PER_PERIOD = 3;
-export const MAX_PROMPTS_PER_PERIOD = 10;
+const MAX_ATTEMPTS_PER_PERIOD = 3;
+const MAX_PROMPTS_PER_PERIOD = 10;
 export const MONTHLY_PROMPT_COST_CAP_USD = 1;
 /** Two prompts = 6 DataForSEO calls, the Workers connection limit. */
 export const PROMPT_CONCURRENCY = 2;
@@ -43,7 +43,7 @@ const LEASE_MS = 15 * 60_000;
  * at: DataForSEO bills it, but the response with the real cost never arrives.
  * Perplexity is sonar at ≤1,024 output tokens; the most seen was $0.0061.
  */
-export const ESTIMATED_PROMPT_COST_USD = {
+const ESTIMATED_PROMPT_COST_USD = {
   chat_gpt: 0.004,
   google_ai_mode: 0.004,
   perplexity: 0.007,
@@ -63,7 +63,7 @@ export function periodOf(date: Date): string {
 }
 
 /** 06:00 UTC on the 1st of the month after `now` (the PAI-217 anchor). */
-export function nextMonthlyRunAt(now: Date): string {
+function nextMonthlyRunAt(now: Date): string {
   return new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 6, 0, 0),
   ).toISOString();
@@ -126,7 +126,7 @@ function errorRow(
   };
 }
 
-export type PromptRunOutcome = {
+type PromptRunOutcome = {
   promptId: string;
   ran: PromptPlatform[];
   failed: PromptPlatform[];
@@ -144,7 +144,7 @@ const attemptsLeft = (row: AiVisibilityPromptResultRow | undefined) =>
  * row this month (unless `force`) and platforms out of attempts. A failure
  * never overwrites an ok row; it only adds its cost and an attempt.
  */
-export async function runPrompt(input: {
+async function runPrompt(input: {
   prompt: AiVisibilityPromptRow;
   brands: BrandContext;
   billingCustomer: BillingCustomerContext;
@@ -298,7 +298,7 @@ async function recordPromptFailure(
   }
 }
 
-export type PromptSkip = {
+type PromptSkip = {
   promptId: string;
   reason: "busy" | "monthly_prompt_limit" | "cost_cap";
 };
