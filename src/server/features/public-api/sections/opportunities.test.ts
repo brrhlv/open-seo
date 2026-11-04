@@ -61,7 +61,7 @@ describe("getOpportunitiesSection", () => {
   it("shapes scored rows with reason codes and caches the section", async () => {
     const section = await getOpportunitiesSection("p", NOW);
     expect(mocks.getOpportunities).toHaveBeenCalledWith(
-      { projectId: "p", limit: 25 },
+      { projectId: "p", limit: 35 },
       { now: NOW },
     );
     expect(section).toEqual({
@@ -91,10 +91,29 @@ describe("getOpportunitiesSection", () => {
       ],
     });
     expect(mocks.setCached).toHaveBeenCalledWith(
-      "public-summary:opportunities:v2:p",
+      "public-summary:opportunities:v3:p",
       section,
       6 * 60 * 60,
     );
+  });
+
+  it("leaves admin, API and auth routes out of the rows", async () => {
+    mocks.getOpportunities.mockResolvedValue({
+      ...result,
+      totalCandidateRows: 4,
+      rows: [
+        row({ page: "https://a.com/admin/login", score: 90 }),
+        ...result.rows,
+        row({ page: "https://a.com/api/leads" }),
+      ],
+    });
+    const section = await getOpportunitiesSection("p", NOW);
+    if (!("rows" in section)) throw new Error("expected rows");
+    expect(section.rows.map((r) => r.page)).toEqual([
+      "https://a.com/corporate-events",
+      "https://a.com/blog/x",
+    ]);
+    expect(section.totalCandidates).toBe(2);
   });
 
   it("serves a valid cached section without calling Google", async () => {
@@ -117,7 +136,7 @@ describe("getOpportunitiesSection", () => {
       connected: false,
     });
     expect(mocks.setCached).toHaveBeenCalledWith(
-      "public-summary:opportunities:v2:p",
+      "public-summary:opportunities:v3:p",
       { connected: false },
       600,
     );
@@ -132,7 +151,7 @@ describe("getOpportunitiesSection", () => {
       error: "ga4_quota_exhausted",
     });
     expect(mocks.setCached).toHaveBeenCalledWith(
-      "public-summary:opportunities:v2:p",
+      "public-summary:opportunities:v3:p",
       { error: "ga4_quota_exhausted" },
       600,
     );

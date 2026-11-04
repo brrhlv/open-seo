@@ -164,6 +164,35 @@ describe("getGa4KeyEventsSection", () => {
     expect(section.capturedAt).toBe(NOW.toISOString());
   });
 
+  it("leaves admin, API and auth routes out of landing pages and organic counts", async () => {
+    reports(
+      [comparisonRow("generate_lead", 3, 3)],
+      [lead("/corporate-events", 2), lead("/admin/leads", 1)],
+      [
+        {
+          hostName: "a.com",
+          landingPage: "/admin/login",
+          sessions: 13,
+          keyEvents: 0,
+        },
+        { hostName: "a.com", landingPage: "/api/leads", sessions: 2 },
+        { hostName: "a.com", landingPage: "/sign-in", sessions: 1 },
+        {
+          hostName: "a.com",
+          landingPage: "/corporate-events",
+          sessions: 21,
+          keyEvents: 2,
+          sessionKeyEventRate: 0.095,
+        },
+      ],
+    );
+    const section = await getGa4KeyEventsSection("p", DATES, NOW);
+    expect(section.landingPages.map((page) => page.page)).toEqual([
+      "a.com/corporate-events",
+    ]);
+    expect(section.events[0]?.organicKeyEvents).toBe(2);
+  });
+
   it("does not call a low-volume event silent", async () => {
     reports([comparisonRow("phone_click", 0, 4)], [], []);
     const section = await getGa4KeyEventsSection("p", DATES, NOW);
