@@ -74,6 +74,11 @@ declare namespace Cloudflare {
     MCP_HEADLESS_POLICY_AUD?: string;
     // Comma-separated Access service-token client ids allowed on that path.
     MCP_HEADLESS_SERVICE_TOKEN_CLIENT_IDS?: string;
+    // PAI-252 (src/server/features/google-sa): base64 of the dedicated Google
+    // service account's JSON key; the secondary holds the other key during a
+    // rotation (same account). Unset = no service-account path.
+    GOOGLE_SA_KEY_JSON_B64?: string;
+    GOOGLE_SA_KEY_JSON_B64_SECONDARY?: string;
   }
 }
 

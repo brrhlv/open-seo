@@ -2,6 +2,12 @@
 import { z } from "zod";
 import { getAuth } from "@/lib/auth";
 import {
+  GA4_SA_SCOPE,
+  getServiceAccountAccessToken,
+  isServiceAccountGrant,
+  SA_GA4_DENIED_MESSAGE,
+} from "@/server/features/google-sa/serviceAccountGrant";
+import {
   Ga4AdminApiError,
   Ga4DataApiError,
   Ga4MalformedResponseError,
@@ -129,6 +135,17 @@ async function getGa4AccessToken(opts: {
   userId: string;
   ga4AccountId: string;
 }): Promise<string> {
+  // PAI-252: a property linked via the service account has no user grant.
+  if (isServiceAccountGrant(opts.ga4AccountId)) {
+    try {
+      return await getServiceAccountAccessToken(GA4_SA_SCOPE);
+    } catch (error) {
+      throw new Ga4TokenError(
+        "Could not mint a Google Analytics token for the service account.",
+        error,
+      );
+    }
+  }
   let result: { accessToken?: string } | undefined;
   try {
     result = await getAuth().api.getAccessToken({
@@ -200,7 +217,9 @@ export function createGa4AdminClient(opts: {
     if (!response.ok) {
       throw new Ga4AdminApiError(
         response.status,
-        adminMessageForStatus(response.status),
+        response.status === 403 && isServiceAccountGrant(opts.ga4AccountId)
+          ? SA_GA4_DENIED_MESSAGE
+          : adminMessageForStatus(response.status),
       );
     }
     return response.json();
@@ -468,7 +487,9 @@ export function createGa4DataClient(opts: {
       }
       throw new Ga4DataApiError(
         response.status,
-        dataMessageForStatus(response.status),
+        response.status === 403 && isServiceAccountGrant(opts.ga4AccountId)
+          ? SA_GA4_DENIED_MESSAGE
+          : dataMessageForStatus(response.status),
         safeRetryAfter(response),
         upstreamReason,
       );

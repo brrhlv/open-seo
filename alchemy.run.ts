@@ -283,6 +283,11 @@ const dataEnv = {
   MCP_HEADLESS_SERVICE_TOKEN_CLIENT_IDS: optionalVar(
     "MCP_HEADLESS_SERVICE_TOKEN_CLIENT_IDS",
   ),
+  // PAI-252: Google service-account key(s) for Search Console + GA4.
+  GOOGLE_SA_KEY_JSON_B64: optionalSecret("GOOGLE_SA_KEY_JSON_B64"),
+  GOOGLE_SA_KEY_JSON_B64_SECONDARY: optionalSecret(
+    "GOOGLE_SA_KEY_JSON_B64_SECONDARY",
+  ),
   LOOPS_API_KEY: optionalSecret("LOOPS_API_KEY"),
   LOOPS_TRANSACTIONAL_VERIFY_EMAIL_ID: optionalVar(
     "LOOPS_TRANSACTIONAL_VERIFY_EMAIL_ID",
