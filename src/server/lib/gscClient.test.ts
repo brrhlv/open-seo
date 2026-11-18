@@ -1,13 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type * as ServiceAccountGrantModule from "@/server/features/google-sa/serviceAccountGrant";
+import {
+  GOOGLE_SA_ACCOUNT_ID,
+  SA_GSC_DENIED_MESSAGE,
+} from "@/server/features/google-sa/serviceAccountGrant";
 
 const mocks = vi.hoisted(() => ({
   getAccessToken: vi.fn(),
+  getServiceAccountAccessToken: vi.fn<(scope: string) => Promise<string>>(),
   fetch: vi.fn<typeof fetch>(),
 }));
 
 vi.mock("@/lib/auth", () => ({
   getAuth: () => ({ api: { getAccessToken: mocks.getAccessToken } }),
 }));
+vi.mock(
+  "@/server/features/google-sa/serviceAccountGrant",
+  async (importOriginal) => ({
+    ...(await importOriginal<typeof ServiceAccountGrantModule>()),
+    getServiceAccountAccessToken: mocks.getServiceAccountAccessToken,
+  }),
+);
 
 function jsonResponse(body: unknown, status = 200) {
   return Response.json(body, { status });
@@ -150,6 +163,26 @@ describe("gscClient", () => {
     await expect(
       createGscClient({ userId: "u1" }).listSites(),
     ).rejects.toBeInstanceOf(GscApiError);
+  });
+
+  it("reads a service-account link with the service account's token, never a user grant", async () => {
+    mocks.getServiceAccountAccessToken.mockResolvedValue("sa_tok");
+    mocks.fetch.mockResolvedValue(jsonResponse({ error: "forbidden" }, 403));
+    const { createGscClient } = await import("./gscClient");
+
+    await expect(
+      createGscClient({
+        userId: "u1",
+        gscAccountId: GOOGLE_SA_ACCOUNT_ID,
+      }).listSites(),
+    ).rejects.toMatchObject({ status: 403, message: SA_GSC_DENIED_MESSAGE });
+    expect(mocks.getServiceAccountAccessToken).toHaveBeenCalledWith(
+      "https://www.googleapis.com/auth/webmasters.readonly",
+    );
+    expect(mocks.getAccessToken).not.toHaveBeenCalled();
+    expect(mocks.fetch.mock.calls[0]?.[1]?.headers).toMatchObject({
+      Authorization: "Bearer sa_tok",
+    });
   });
 
   it("maps 429 to a rate-limit GscApiError", async () => {

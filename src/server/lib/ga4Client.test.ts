@@ -1,5 +1,10 @@
 /* eslint-disable max-lines -- covers Admin + Data APIs and the new runReportRaw path in one file (gscClient.test.ts precedent) */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type * as ServiceAccountGrantModule from "@/server/features/google-sa/serviceAccountGrant";
+import {
+  GOOGLE_SA_ACCOUNT_ID,
+  SA_GA4_DENIED_MESSAGE,
+} from "@/server/features/google-sa/serviceAccountGrant";
 import { createGa4AdminClient, createGa4DataClient } from "./ga4Client";
 import {
   Ga4AdminApiError,
@@ -10,12 +15,20 @@ import {
 
 const mocks = vi.hoisted(() => ({
   getAccessToken: vi.fn(),
+  getServiceAccountAccessToken: vi.fn<(scope: string) => Promise<string>>(),
   fetch: vi.fn<typeof fetch>(),
 }));
 
 vi.mock("@/lib/auth", () => ({
   getAuth: () => ({ api: { getAccessToken: mocks.getAccessToken } }),
 }));
+vi.mock(
+  "@/server/features/google-sa/serviceAccountGrant",
+  async (importOriginal) => ({
+    ...(await importOriginal<typeof ServiceAccountGrantModule>()),
+    getServiceAccountAccessToken: mocks.getServiceAccountAccessToken,
+  }),
+);
 
 function jsonResponse(body: unknown, status = 200) {
   return Response.json(body, { status });
@@ -133,6 +146,25 @@ describe("ga4Client admin API", () => {
         ga4AccountId: "google-sub-a",
       }).listProperties(),
     ).rejects.toMatchObject({ status: 401 });
+  });
+
+  it("reads a service-account link with the service account's token, never a user grant", async () => {
+    mocks.getServiceAccountAccessToken.mockResolvedValue("sa_tok");
+    mocks.fetch.mockResolvedValue(jsonResponse({ error: "denied" }, 403));
+
+    await expect(
+      createGa4AdminClient({
+        userId: "u1",
+        ga4AccountId: GOOGLE_SA_ACCOUNT_ID,
+      }).getProperty("properties/11"),
+    ).rejects.toMatchObject({ status: 403, message: SA_GA4_DENIED_MESSAGE });
+    expect(mocks.getServiceAccountAccessToken).toHaveBeenCalledWith(
+      "https://www.googleapis.com/auth/analytics.readonly",
+    );
+    expect(mocks.getAccessToken).not.toHaveBeenCalled();
+    expect(mocks.fetch.mock.calls[0]?.[1]?.headers).toMatchObject({
+      Authorization: "Bearer sa_tok",
+    });
   });
 
   it("throws a token error when Better Auth cannot mint an access token", async () => {

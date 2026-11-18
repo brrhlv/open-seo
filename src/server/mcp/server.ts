@@ -53,6 +53,7 @@ import {
   getSearchOpportunitiesTool,
 } from "@/server/mcp/tools/google-analytics-tools";
 import { createProjectTool } from "@/server/mcp/tools/create-project";
+import { linkGoogleServiceAccountTool } from "@/server/mcp/tools/link-google-service-account";
 import { listProjectsTool } from "@/server/mcp/tools/list-projects";
 import {
   getProjectContextTool,
@@ -221,6 +222,7 @@ export function createOpenSeoMcpServer(authProps: McpProps) {
   register(getKeywordMetricsTool);
   register(getSearchConsolePerformanceTool);
   register(inspectUrlsTool);
+  register(linkGoogleServiceAccountTool);
   register(getGoogleAnalyticsOrganicLandingPagesTool);
   register(getGoogleAnalyticsPagePerformanceTool);
   register(getGoogleAnalyticsKeyEventsTool);

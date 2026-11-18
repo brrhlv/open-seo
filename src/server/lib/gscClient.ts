@@ -1,4 +1,10 @@
 import { getAuth } from "@/lib/auth";
+import {
+  getServiceAccountAccessToken,
+  GSC_SA_SCOPE,
+  isServiceAccountGrant,
+  SA_GSC_DENIED_MESSAGE,
+} from "@/server/features/google-sa/serviceAccountGrant";
 import { GSC_OAUTH_PROVIDER_ID } from "@/shared/gsc";
 import { GscApiError, GscTokenError } from "./gscErrors";
 import { scopedAccessToken } from "./sharedAccessTokens";
@@ -94,6 +100,17 @@ export function createGscClient(opts: {
   }
 
   async function mintToken(): Promise<string> {
+    // PAI-252: a property linked via the service account has no user grant.
+    if (isServiceAccountGrant(opts.gscAccountId)) {
+      try {
+        return await getServiceAccountAccessToken(GSC_SA_SCOPE);
+      } catch (error) {
+        throw new GscTokenError(
+          "Could not mint a Search Console token for the service account.",
+          error,
+        );
+      }
+    }
     let result: { accessToken?: string } | undefined;
     try {
       // Headerless call: getAccessToken trusts body.userId when no request
@@ -139,7 +156,9 @@ export function createGscClient(opts: {
       const body = await response.text().catch(() => "");
       throw new GscApiError(
         response.status,
-        messageForStatus(response.status, body),
+        response.status === 403 && isServiceAccountGrant(opts.gscAccountId)
+          ? SA_GSC_DENIED_MESSAGE
+          : messageForStatus(response.status, body),
         body,
       );
     }
